@@ -24,7 +24,7 @@
 约定：
     - 产物存 Cache/charts/（中间产物，TTL 3 天；嵌入 PPT/Word 后即可随 TTL 清理）
     - PNG 1920x1080（PPT 全屏），GIF 960x540（控制体积），MP4 1920x1080
-    - 中文微软雅黑预设，import 即用；动画为"数据生长"式
+    - 中文微软雅黑预设，import 即用；动画为"数据生长"式，GIF 播放一遍停在末帧（PPT 放映友好）
     - 注意：Word 不播放 GIF/MP4 动画（只显示首帧），文档配图一律用 PNG
 """
 from __future__ import annotations
@@ -385,6 +385,19 @@ def _bar_multi_draw(title, cats, series, th):
 
 # ---------- 渲染 ----------
 
+class _OncePillowWriter(animation.PillowWriter):
+    """播放一遍后停在末帧的 GIF writer。
+
+    matplotlib 默认 finish() 写死 loop=0（无限循环），插进 PPT 会反复重播；
+    不传 loop 参数即不写 NETSCAPE 循环扩展，GIF 播完停在最后一帧。
+    """
+
+    def finish(self):
+        self._frames[0].save(
+            self.outfile, save_all=True, append_images=self._frames[1:],
+            duration=int(1000 / self.fps))
+
+
 def _render(kind, title, draw, *, animate, fmt, out,
             face: str = 'white', polar: bool = False) -> Path:
     CHART_DIR.mkdir(parents=True, exist_ok=True)
@@ -407,8 +420,8 @@ def _render(kind, title, draw, *, animate, fmt, out,
                                                              extra_args=['-pix_fmt', 'yuv420p']),
                                       MP4_FPS, DPI_MP4)
         else:
-            path, writer, fps, dpi = (CHART_DIR / f'{stem}.gif',
-                                      animation.PillowWriter(fps=GIF_FPS), GIF_FPS, DPI_GIF)
+                path, writer, fps, dpi = (CHART_DIR / f'{stem}.gif',
+                                          _OncePillowWriter(fps=GIF_FPS), GIF_FPS, DPI_GIF)
 
         fig = plt.figure(figsize=FIGSIZE, facecolor=face)
 

@@ -1,6 +1,6 @@
 # AI-WORK 项目说明
 
-通过 AI（ZCode）辅助生成 **PPT、PDF、Word** 三类交付文档，并配套渲染质检链路。
+通过 AI辅助生成 **PPT、PDF、Word** 三类交付文档，并配套渲染质检链路。
 
 ## 目录约定
 - PPT/    存放生成的 .pptx
@@ -31,11 +31,3 @@ npm install
 #可选安装
 winget install Gyan.FFmpeg   # 仅动画图表导出 MP4 时需要，可不装
 ```
-
-## 规范
-- 幻灯片 16:9；PPT 中文统一微软雅黑，标题 28–32pt、正文 18–24pt
-- reportlab 生成 PDF：标题黑体 SimHei、正文宋体 SimSun
-- 每页要点不超过 6 行
-
-## 交付前检查
-- 生成后必须实际打开验证（渲染成图或提取文本），确认无乱码、无溢出
