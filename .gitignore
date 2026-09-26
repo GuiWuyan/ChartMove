@@ -1,0 +1,7 @@
+/.zcodeignore
+/node_modules/
+/.venv/
+/PPT/
+/FILE/
+/Cache/
+*.idea/
