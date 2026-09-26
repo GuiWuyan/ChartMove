@@ -4,4 +4,5 @@
 /PPT/
 /FILE/
 /Cache/
-*.idea/
+.idea/
+__pycache__/

@@ -6,6 +6,9 @@
 ## 技术选型
 
 - 生成 PPT：pptxgenjs（Node，首选）；复杂排版用 python-pptx
+- PPT 配图：`from TOOLS.image_fetch import fetch_images` 或命令行 `python TOOLS/image_fetch.py 关键词 --n 6`；图片存 `Cache/images/<关键词>/`，来源与许可记录在同目录 sources.md，对外发布的 deck 优先用其中 CC 授权图
+- 图表生成：`from TOOLS.chart import bar, line, pie, donut, area, combo, line_multi, bar_multi, radar`（存 `Cache/charts/`）；静态 PNG 供 PPT/Word 插入；`animate=True` 出动画（GIF 插 PPT 放映自动播放，MP4 需 ffmpeg）；Word 不播放动画，文档配图一律用 PNG
+- 图表风格：各图表函数的 `style` 参数按用户意图选择，主题清单见 TOOLS/chart.py 的 THEMES（excel/soft/dark/minimal/tech/vivid/business/science），未提及用 excel
 - 生成 PDF：
   - PPT 转 PDF：PowerPoint COM（pywin32），保真度最高，优先于任何第三方转换
   - 直接排版：reportlab，中文字体一律 `from TOOLS.reportlab_fonts import FONT_HEI, FONT_SONG`，禁止手写字体名字符串
