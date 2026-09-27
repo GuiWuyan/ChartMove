@@ -1,7 +1,8 @@
 """输出目录解析与文件命名。
 
 约定(docs/plan.md 第 4 节):输出目录持久化,绝不做 TTL 清理。
-优先级:显式 out_dir 参数 > 环境变量 CHARTGEN_OUT_DIR > 默认 ~/ChartGen/。
+优先级:显式 out_dir 参数 > 环境变量 CHARTGEN_OUT_DIR > 默认 ./Results/(相对当前
+工作目录,项目内持久;桌宠等 CWD 不可预期的场景请设 CHARTGEN_OUT_DIR)。
 """
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ import re
 from pathlib import Path
 
 ENV_OUT_DIR = 'CHARTGEN_OUT_DIR'
-DEFAULT_DIR_NAME = 'ChartGen'
+DEFAULT_DIR_NAME = 'Results'
 
 
 def resolve_out_dir(out_dir=None) -> Path:
@@ -20,7 +21,7 @@ def resolve_out_dir(out_dir=None) -> Path:
     elif os.environ.get(ENV_OUT_DIR):
         p = Path(os.environ[ENV_OUT_DIR])
     else:
-        p = Path.home() / DEFAULT_DIR_NAME
+        p = Path(DEFAULT_DIR_NAME)
     p = p.expanduser()
     p.mkdir(parents=True, exist_ok=True)
     return p.resolve()

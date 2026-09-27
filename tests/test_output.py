@@ -17,11 +17,11 @@ def test_priority_env_over_default(tmp_path, monkeypatch):
     assert resolve_out_dir() == (tmp_path / 'env').resolve()
 
 
-def test_default_home_dir(tmp_path, monkeypatch):
+def test_default_results_dir(tmp_path, monkeypatch):
     monkeypatch.delenv('CHARTGEN_OUT_DIR', raising=False)
-    monkeypatch.setattr('pathlib.Path.home', lambda: tmp_path)
-    assert resolve_out_dir() == (tmp_path / 'ChartGen').resolve()
-    assert (tmp_path / 'ChartGen').is_dir()
+    monkeypatch.chdir(tmp_path)  # 默认 ./Results/,相对当前工作目录
+    assert resolve_out_dir() == (tmp_path / 'Results').resolve()
+    assert (tmp_path / 'Results').is_dir()
 
 
 def test_safe_stem():

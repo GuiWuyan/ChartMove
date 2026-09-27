@@ -6,7 +6,7 @@
 
 - Python 一律用 `.venv/Scripts/python.exe`;Node 侧无依赖,勿创建 package.json
 - 新增 Python 库:装进 .venv 并同步写入 requirements.txt(版本约束用 `>=`,禁用 `>`)
-- 图表产物写持久目录(默认 `~/ChartGen/`,可用 `out_dir=` 参数或 `CHARTGEN_OUT_DIR` 环境变量覆盖),绝不做 TTL 清理
+- 图表产物写持久目录(默认项目内 `Results/`,可用 `--out-dir` / `out_dir=` 参数或 `CHARTGEN_OUT_DIR` 环境变量覆盖),绝不做 TTL 清理
 - 临时测试文件用完即删
 - GUI 已取消(2026-09-27),入口只有 CLI 与 MCP,勿再规划 GUI
 - 如果无法依赖现在的环境制作出成品,则反馈给用户原因并道歉

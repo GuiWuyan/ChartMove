@@ -8,7 +8,7 @@
     # -> .../ChartGen/bar_季度产量.gif
 
 约定:animate=True 出 GIF(默认)/ MP4,静态图 fmt='png'(默认)/'pdf'/'tif';
-产物默认写 ~/ChartGen/(持久,不做 TTL 清理);不播放动画的场景(如 Word)一律 PNG。
+产物默认写 ./Results/(持久,不做 TTL 清理);不播放动画的场景(如 Word)一律 PNG。
 """
 from __future__ import annotations
 
