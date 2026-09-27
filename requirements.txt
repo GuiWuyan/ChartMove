@@ -1,4 +1,9 @@
+# 运行时依赖(M1 起包依赖以 pyproject.toml [project.dependencies] 为准,本文件同步维护)
 matplotlib>=3.11.2
 mcp>=2.2.0
 pillow>=12.3.0
-pywin32>=312
+pywin32>=312; sys_platform == "win32"
+
+# 开发依赖(与 pyproject.toml [project.optional-dependencies].dev 同步)
+pytest>=8.0
+ruff>=0.6

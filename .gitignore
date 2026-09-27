@@ -7,3 +7,8 @@
 .idea/
 __pycache__/
 /scripts/
+/dist/
+/build/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
