@@ -61,7 +61,11 @@ def _style(ax, title: str, th: dict, grid_axis: str | None = None) -> None:
     ax.set_facecolor(th['face'])
 
 
-def _legend_bottom(ax, handles: list, th: dict) -> None:
+def _legend_bottom(ax, handles: list, th: dict, rotated: bool = False) -> None:
+    """底部图例;长标签旋转时会与刻度文字重叠,此时自动改放到顶部。"""
+    if rotated:
+        _legend_top(ax, handles, th)
+        return
     if not handles:
         return
     ax.legend(handles=handles, loc='upper center', bbox_to_anchor=(0.5, -0.08),
@@ -103,13 +107,16 @@ def _ylim(ax, vals: list[float], th: dict) -> None:
     ax.set_ylim(lo - 0.15 * pad, hi + 0.2 * pad)
 
 
-def _xticks(ax, cats: list[str], th: dict) -> None:
+def _xticks(ax, cats: list[str], th: dict) -> bool:
+    """设置类目刻度;标签多且长时旋转 30° 并加大下边距,返回是否发生了旋转。"""
     xs = list(range(len(cats)))
     ax.set_xticks(xs)
     if len(cats) > 6 and max(len(c) for c in cats) > 4:
         ax.set_xticklabels(cats, rotation=30, ha='right')
-    else:
-        ax.set_xticklabels(cats)
+        ax.figure.subplots_adjust(bottom=0.2)
+        return True
+    ax.set_xticklabels(cats)
+    return False
 
 
 def _has_spread(vals: list[float]) -> bool:
@@ -167,14 +174,14 @@ def _line_draw(title, cats, vals, th, fill=False, name='数值'):
                     ax.scatter([idx], [vals[idx]], s=HIGHLIGHT_SIZE, color=c,
                                zorder=6, edgecolors=th['face'], linewidths=1.5)
         _ylim(ax, vals, th)
-        _xticks(ax, cats, th)
+        rotated = _xticks(ax, cats, th)
         handles = [Line2D([0], [0], color=th['palette'][0], lw=4, marker='o',
                           markersize=12, label=name)]
         if _has_spread(vals):
             handles += [Line2D([0], [0], linestyle='none', marker='o', markersize=13,
                                markerfacecolor=c, label=t)
                         for c, t in ((th['hi_max'], '最好'), (th['hi_min'], '最差'))]
-        _legend_bottom(ax, handles, th)
+        _legend_bottom(ax, handles, th, rotated)
     return draw
 
 
@@ -278,7 +285,7 @@ def _combo_draw(title, cats, bar_vals, line_vals, th, bar_name, line_name):
         hs = [v * _stagger(p, i, n) for i, v in enumerate(bar_vals)]
         ax.bar(range(n), hs, width=0.5, color=th['palette'][0])
         ax.set_ylim(0, max(max(bar_vals) * 1.2, 1))
-        _xticks(ax, cats, th)
+        rotated = _xticks(ax, cats, th)
 
         ax2 = ax.twinx()
         pos = _ease(p) * (n - 1) if n > 1 else 0.0
@@ -296,7 +303,7 @@ def _combo_draw(title, cats, bar_vals, line_vals, th, bar_name, line_name):
 
         _legend_bottom(ax, [Patch(facecolor=th['palette'][0], label=bar_name),
                             Line2D([0], [0], color=th['palette'][1], lw=4, marker='o',
-                                   markersize=12, label=line_name)], th)
+                                   markersize=12, label=line_name)], th, rotated)
     return draw
 
 

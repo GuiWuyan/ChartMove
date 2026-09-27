@@ -128,26 +128,45 @@ def _series_or_json(args):
     raise ValueError('请用 --categories + --series,或用 --data 传含 categories/series 的 JSON')
 
 
+def _col_index(spec, header, default):
+    """--cat-col / --col:表头名或从 1 数的序号;未指定返回 default。"""
+    if spec is None:
+        return default
+    if spec in header:
+        return header.index(spec)
+    try:
+        idx = int(spec) - 1
+    except ValueError:
+        raise ValueError(f'找不到列 {spec!r};可用列:{", ".join(header)}') from None
+    if not 0 <= idx < len(header):
+        raise ValueError(f'列序号 {spec} 超出范围,共 {len(header)} 列')
+    return idx
+
+
 def _file_cols(args, min_cols=1):
-    """--file 数据:第 1 列类目,其余列数值;返回 (类目, 数值列列表, 表头)。"""
+    """--file 数据:--cat-col 指定类目列(默认第 1 列),其余列为数值;
+    --col 可挑选 1 个数值列(表头名或序号)。返回 (类目, [(列名, 数值列表)], 表头)。"""
     header, rows = read_table(args.file)
-    cats = [r[0] if r else '' for r in rows]
+    cat_i = _col_index(getattr(args, 'cat_col', None), header, 0)
+    cats = [r[cat_i] if len(r) > cat_i else '' for r in rows]
+    if getattr(args, 'col', None):
+        val_is = [_col_index(args.col, header, None)]
+    else:
+        val_is = [j for j in range(len(header)) if j != cat_i]
     cols = []
-    for j in range(1, len(header)):
-        cols.append([to_float(r[j], f'(列「{header[j]}」)')
-                     for r in rows if len(r) > j and r[j] != ''])
+    for j in val_is:
+        nm = header[j] or f'列{j + 1}'
+        cols.append((nm, [to_float(r[j], f'(列「{nm}」)')
+                          for r in rows if len(r) > j and r[j] != '']))
     if len(cols) < min_cols:
-        raise ValueError(f'--file 至少需要 {min_cols} 列数值(第 1 列为类目)')
+        raise ValueError(f'--file 至少需要 {min_cols} 列数值')
     return cats, cols, header
-
-
-def _series_from_cols(header, cols) -> list[tuple[str, list[float]]]:
-    return [(header[j + 1] or f'系列{j + 1}', col) for j, col in enumerate(cols)]
 
 
 def _one_col(cols, t):
     if len(cols) != 1:
-        raise ValueError(f'{t} 只支持 1 列数值,--file 里有 {len(cols)} 列')
+        raise ValueError(f'{t} 只支持 1 列数值,--file 里有 {len(cols)} 列'
+                         '(可用 --col 指定其中一列)')
 
 
 # ---------- 各类型的运行逻辑 ----------
@@ -155,11 +174,11 @@ def _one_col(cols, t):
 def _run_bar(fn, args):
     kw = _common_kwargs(args)
     if args.file:
-        cats, cols, header = _file_cols(args)
+        cats, cols, _ = _file_cols(args)
         if len(cols) >= 2:  # 多数值列自动升级为分组柱状图
-            return bar_multi(args.title, cats, _series_from_cols(header, cols), **kw)
+            return bar_multi(args.title, cats, cols, **kw)
         _one_col(cols, 'bar')
-        return fn(args.title, cats, cols[0], horizontal=args.horizontal, **kw)
+        return fn(args.title, cats, cols[0][1], horizontal=args.horizontal, **kw)
     cats, vals = _pairs_or_json(args)
     return fn(args.title, cats, vals, horizontal=args.horizontal, **kw)
 
@@ -167,11 +186,11 @@ def _run_bar(fn, args):
 def _run_line(fn, args):
     kw = _common_kwargs(args)
     if args.file:
-        cats, cols, header = _file_cols(args)
+        cats, cols, _ = _file_cols(args)
         if len(cols) >= 2:  # 多数值列自动升级为多系列折线
-            return line_multi(args.title, cats, _series_from_cols(header, cols), **kw)
+            return line_multi(args.title, cats, cols, **kw)
         _one_col(cols, 'line')
-        return fn(args.title, cats, cols[0], **kw)
+        return fn(args.title, cats, cols[0][1], name=cols[0][0], **kw)  # 图例名 = 列表头
     cats, vals = _pairs_or_json(args)
     return fn(args.title, cats, vals, **kw)
 
@@ -181,16 +200,16 @@ def _run_waterfall(fn, args):
     if args.file:
         cats, cols, _ = _file_cols(args)
         _one_col(cols, 'waterfall')
-        return fn(args.title, cats, cols[0], total=not args.no_total, **kw)
+        return fn(args.title, cats, cols[0][1], total=not args.no_total, **kw)
     cats, vals = _pairs_or_json(args)
     return fn(args.title, cats, vals, total=not args.no_total, **kw)
 
 
 def _run_combo(fn, args):
     kw = _common_kwargs(args)
-    if args.file:  # 第 1 列类目,第 2 列柱值,第 3 列折线值
+    if args.file:  # 类目列之后的第 1 列柱值、第 2 列折线值
         cats, cols, _ = _file_cols(args, min_cols=2)
-        bvals, lvals = cols[0], cols[1]
+        bvals, lvals = cols[0][1], cols[1][1]
     else:
         cats, bvals = _pairs_or_json(args)
         lvals = _num_list(args.line)
@@ -201,8 +220,8 @@ def _run_combo(fn, args):
 def _run_multi(fn, args):
     kw = _common_kwargs(args)
     if args.file:
-        cats, cols, header = _file_cols(args)
-        ss = _series_from_cols(header, cols)
+        cats, cols, _ = _file_cols(args)
+        ss = cols
     else:
         cats, ss = _series_or_json(args)
     vkw = {'value_labels': False} if getattr(args, 'no_value_labels', False) else {}
@@ -271,12 +290,13 @@ def _run_hist(fn, args):
 
 def _run_heatmap(fn, args):
     kw = _common_kwargs(args)
-    if args.file:  # 首列为行名,首行为列表头
+    if args.file:  # 类目列=行名(默认第 1 列),其余列为矩阵
         header, rows = read_table(args.file)
-        cols = header[1:]
-        rlabels = [r[0] if r else '' for r in rows]
-        matrix = [[to_float(r[j], f'(列「{header[j]}」)') for j in range(1, len(header))]
-                  for r in rows]
+        cat_i = _col_index(getattr(args, 'cat_col', None), header, 0)
+        rlabels = [r[cat_i] if len(r) > cat_i else '' for r in rows]
+        val_is = [j for j in range(len(header)) if j != cat_i]
+        cols = [header[j] or f'列{j + 1}' for j in val_is]
+        matrix = [[to_float(r[j], f'(列「{header[j]}」)') for j in val_is] for r in rows]
         return fn(args.title, rlabels, cols, matrix, annotate=not args.no_annotate, **kw)
     d = _load_json(args.data) if args.data else {}
     if not all(k in d for k in ('rows', 'cols', 'values')):
@@ -290,7 +310,7 @@ def _default_run(fn, args):
     if args.file:
         cats, cols, _ = _file_cols(args)
         _one_col(cols, args.type)
-        return fn(args.title, cats, cols[0], **kw)
+        return fn(args.title, cats, cols[0][1], **kw)
     cats, vals = _pairs_or_json(args)
     return fn(args.title, cats, vals, **kw)
 
@@ -341,6 +361,8 @@ def _build_parser() -> argparse.ArgumentParser:
     common.add_argument('--data', help='JSON 入参(内联字符串或文件路径),可替代位置数据')
     common.add_argument('--file', help='CSV / Excel 数据文件(.csv/.xlsx,首行为表头;'
                                        '第 1 列类目,其余列数值,多数值列 bar/line 自动转多系列)')
+    common.add_argument('--cat-col', help='--file 的类目列(表头名或从 1 数的序号,默认第 1 列)')
+    common.add_argument('--col', help='--file 挑选 1 个数值列(表头名或序号;默认除类目列外全部)')
 
     sps = {}
     for name, fn, text, items_help in (

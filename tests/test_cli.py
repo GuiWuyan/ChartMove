@@ -163,3 +163,20 @@ def test_file_csv_hist(tmp_path):
     p = _csv(tmp_path, 'h.csv', '样本\n12\n15\n18\n22\n30\n25\n')
     _run(tmp_path, 'hist', '分布', '--file', str(p), '--bins', '3')
     _expect_file(tmp_path, 'hist_分布.png')
+
+
+def test_file_col_and_cat_col(tmp_path):
+    """--cat-col / --col 按表头名或序号选列;单列折线的图例名取列表头。"""
+    p = _csv(tmp_path, 'f.csv', '代码,名称,收益率\n001,A,6.1\n002,B,-3.2\n003,C,12.5\n')
+    _run(tmp_path, 'line', '选列', '--file', str(p), '--cat-col', '名称', '--col', '收益率')
+    _expect_file(tmp_path, 'line_选列.png')
+    _run(tmp_path, 'line', '选列', '--file', str(p), '--cat-col', '2',
+         '--col', '3', '--out', '按序号')
+    _expect_file(tmp_path, '按序号.png')
+
+
+def test_file_multi_col_rejects_without_select(tmp_path, capsys):
+    """未选列时多数值列类型报错并提示用 --col。"""
+    p = _csv(tmp_path, 'f.csv', '类目,a,b\nx,1,2\ny,3,4\n')
+    assert cli.main(['pie', 't', '--file', str(p), '--out-dir', str(tmp_path)]) == 1
+    assert '--col' in capsys.readouterr().err

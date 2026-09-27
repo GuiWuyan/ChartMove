@@ -13,32 +13,59 @@
 
 ## CLI
 
+命令结构:**`chartgen <类型> "标题" [数据] [通用参数] [类型专属参数]`**,输出文件绝对路径,默认写入 `./Results/`。
+
+16 种类型:`bar` / `line` / `line-multi` / `area` / `pie` / `donut` / `combo` / `bar-multi` / `radar` / `scatter` / `bubble` / `hist` / `box` / `heatmap` / `waterfall` / `funnel`(多词类型用 kebab-case;`chartgen --help` 看总览,`chartgen bar --help` 看单类型全部参数)。
+
+**数据的四种写法**(按类型任选其一,`--file` 优先级最高):
+
+| 方式 | 适用类型 | 示例 |
+|---|---|---|
+| 内联 `类目=值` | 单系列类目型 | `chartgen bar "季度产量" Q1=120 Q2=200` |
+| `--data` JSON(内联字符串或文件路径) | 单系列 | `--data '{"categories":["Q1"],"values":[120]}'` 或 `--data data.json` |
+| `--series` JSON + `--categories` | 多系列:`line-multi` / `bar-multi` / `radar` / `box` | `--series '[["销售额",[1,2]],...]'`(也接受 `{名称: [值...]}`) |
+| `--file` CSV / Excel | 全部类型 | `--file sales.csv --cat-col 基金名称 --col "盈亏率(%)"` |
+
+**通用参数**:
+
+| 参数 | 说明 |
+|---|---|
+| `--style` | 13 主题 × 4 风格包,默认 business;`chartgen themes` 列出全部 |
+| `--animate` | 出"数据生长"动画(默认 GIF,`--fmt mp4` 可出 MP4) |
+| `--fmt` | `png`(静态默认)/ `pdf` 矢量 / `tif` 600dpi / `gif`(动画默认)/ `mp4` |
+| `--out-dir` / `--out` | 输出目录(默认 `./Results/`)/ 输出文件名(默认 `类型_标题`) |
+| `--dpi` / `--figsize` | 分辨率 / 画幅 `宽x高`(如 `12.8x7.2`) |
+| `--file` | CSV / Excel(.csv/.xlsx,首行为表头;CSV 兼容 UTF-8 与 GBK) |
+| `--cat-col` / `--col` | 配合 `--file`:指定类目列 / 挑选数值列(表头名或从 1 数的序号) |
+
+**类型专属参数**:
+
+| 类型 | 参数 |
+|---|---|
+| `bar` | `--horizontal` 横向条形(排名场景) |
+| `combo` | `--line` 折线值(逗号分隔)、`--bar-name` / `--line-name` 图例名 |
+| `line-multi` | `--no-value-labels` 关闭数值标注 |
+| `scatter` / `bubble` | `--x` `--y` 数值列表(逗号分隔)、`--trend` 趋势线、`--labels` 逐点标注、bubble 加 `--sizes` 气泡大小 |
+| `hist` | `--bins` 分箱数(整数或 `auto`) |
+| `waterfall` | `--no-total` 不追加合计柱 |
+| `heatmap` | `--no-annotate` 不在格子标数值 |
+
+**`--file` 列约定**(CSV / Excel,首行表头;CSV 兼容 UTF-8 与 GBK):默认第 1 列类目、其余列数值,多数值列时 bar/line 自动转多系列图(系列名 = 表头);combo 取类目列后两列(柱、线);box 每列一组(表头 = 组名);scatter/bubble 按 x, y(, sizes)(, labels) 取列;heatmap 类目列 = 行名、表头 = 列名;hist 第 1 列为原始样本;宽表用 `--cat-col` / `--col` 选列。
+
 ```bash
-chartgen bar "季度产量" Q1=120 Q2=200 Q3=90 --style mckinsey
-chartgen line "月度增长" --data data.json        # {"categories": [...], "values": [...]}
-chartgen line-multi "对比" --categories 1月,2月,3月 --series series.json
-chartgen combo "销量与客单价" Q1=120 Q2=200 --line 86,92,78,105
-chartgen scatter "分布" --x 1,2,3 --y 5,7,6 --trend
-chartgen hist "响应时长" 12 15 18 22 --bins 8
-chartgen box "A/B 测试" --series samples.json    # [["对照组", [3.1, ...]], ...]
-chartgen heatmap "热力" --data heat.json         # {"rows": [...], "cols": [...], "values": [[...]]}
-chartgen bar "Top 城市" 上海=30 北京=25 --horizontal
-chartgen themes                                  # 13 主题 × 4 风格包
+chartgen bar "季度产量" Q1=120 Q2=200 Q3=90 --style mckinsey                  # 内联数据
+chartgen line "盈亏率" --file 基金.csv --cat-col 基金名称 --col "盈亏率(%)" --style cyberpunk   # 表格选列
+chartgen themes                                  # 查看 13 主题 × 4 风格包
 ```
 
-**表格文件直接出图**(`--file`,支持 .csv 与 .xlsx,首行为表头;`--style` 等通用参数照常可用):
+## MCP Server(AI / agent 接入)
 
-```bash
-chartgen bar "季度销量" --file sales.csv --style cyberpunk   # 第 1 列类目,其余列数值
-chartgen line "趋势" --file sales.xlsx --style academic      # 多数值列时 bar/line 自动转多系列图
-chartgen combo "双轴" --file dual.csv                        # 第 2 列柱值、第 3 列折线值
-chartgen box "分布" --file samples.csv                       # 每列一组,表头 = 组名
-chartgen scatter "相关" --file xy.csv                        # 列顺序 x, y(, sizes)(, labels)
-chartgen heatmap "热力" --file matrix.csv --style terminal   # 首列为行名,首行为列表头
-chartgen hist "分布" --file samples.csv                      # 第 1 列为原始样本
-```
+stdio 传输,工具面收敛为 2 个;工具描述为英文(LLM 选工具靠它),数据校验错误以中文 `ToolError` 返回:
 
-通用参数:`--style` / `--animate`(默认 GIF)/ `--fmt png|gif|mp4|pdf|tif` / `--out-dir` / `--out` / `--dpi` / `--figsize 宽x高`;`--data` / `--series` 接内联 JSON 字符串或文件路径。CSV 兼容 UTF-8 与 GBK 编码。
+| 工具 | 参数 | 返回 |
+|---|---|---|
+| `make_chart` | `type`(16 种枚举)、`title`、`categories` / `values`(单系列)、`series`(多系列)、`x` / `y` / `sizes`(散点 / 气泡)、`rows` / `cols` / `matrix`(热力图)、`style`(默认 business)、`animate`(默认 false,出 GIF)、`fmt`(png/pdf/tif/gif/mp4)、`out` / `out_dir` | JSON:`{path(绝对路径,即交付物), file_size, type, style, animated}` |
+| `list_themes` | 无 | 13 主题 × 4 风格包:名称 + 中文标签 + 一句话描述 |
 
 ## 开发环境
 
