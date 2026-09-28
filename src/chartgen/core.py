@@ -8,6 +8,7 @@
     # -> .../ChartGen/bar_季度产量.gif
 
 约定:animate=True 出 GIF(默认)/ MP4,静态图 fmt='png'(默认)/'pdf'/'tif';
+GIF 默认播一遍停在末帧,loop=True 无限循环(MP4 是否循环由播放器决定);
 产物默认写 ./Results/(持久,不做 TTL 清理);不播放动画的场景(如 Word)一律 PNG。
 """
 from __future__ import annotations
@@ -89,12 +90,14 @@ def _ease(t: float) -> float:
 
 
 def _stagger(p: float, i: int, n: int) -> float:
-    """第 i 个元素的局部进度:错峰出现(重叠 60%),实现"逐根升起"。"""
+    """第 i 个元素的局部进度:错峰出现(重叠 60%),实现"逐根升起"。
+    时间轴按最后元素的完成点归一,整个动画恰在 p=1 收尾,不留静止尾巴。"""
     if n <= 1:
         return _ease(p)
     span = 0.6
-    start = i / n * (1 - span)
-    return _ease((p - start) / span)
+    last = span + (1 - span) * (n - 1) / n  # 未归一时最后元素的完成点(<1)
+    start = (1 - span) * i / n
+    return _ease((last * p - start) / span)
 
 
 def _ylim(ax, vals: list[float], th: dict) -> None:
@@ -105,6 +108,13 @@ def _ylim(ax, vals: list[float], th: dict) -> None:
         return
     pad = (hi - lo) or (abs(hi) or 1) * 0.2
     ax.set_ylim(lo - 0.15 * pad, hi + 0.2 * pad)
+
+
+def _xlim(ax, lo: float, hi: float) -> None:
+    """按最终数据范围固定 x 轴(5% 边距与 matplotlib 默认一致,动画中轴不跳动)。"""
+    span = hi - lo
+    pad = span * 0.05 if span else max(abs(hi), 1) * 0.4
+    ax.set_xlim(lo - pad, hi + pad)
 
 
 def _xticks(ax, cats: list[str], th: dict) -> bool:
@@ -175,6 +185,7 @@ def _line_draw(title, cats, vals, th, fill=False, name='数值'):
                                zorder=6, edgecolors=th['face'], linewidths=1.5)
         _ylim(ax, vals, th)
         rotated = _xticks(ax, cats, th)
+        _xlim(ax, 0, n - 1)  # 折线逐点延伸,x 轴必须从首帧钉在最终范围
         handles = [Line2D([0], [0], color=th['palette'][0], lw=4, marker='o',
                           markersize=12, label=name)]
         if _has_spread(vals):
@@ -204,6 +215,7 @@ def _line_multi_draw(title, cats, series, th, value_labels=True):
                                 xytext=(0, 9), ha='center', fontsize=10, color=c)
         _ylim(ax, [v for _, vals in series for v in vals], th)
         _xticks(ax, cats, th)
+        _xlim(ax, 0, n - 1)  # 同单系列折线:x 轴从首帧钉在最终范围
         _legend_top(ax, [Line2D([0], [0], color=th['palette'][si % len(th['palette'])],
                                 lw=3, marker='o', markersize=9, label=nm)
                          for si, (nm, _) in enumerate(series)], th)
@@ -286,6 +298,7 @@ def _combo_draw(title, cats, bar_vals, line_vals, th, bar_name, line_name):
         ax.bar(range(n), hs, width=0.5, color=th['palette'][0])
         ax.set_ylim(0, max(max(bar_vals) * 1.2, 1))
         rotated = _xticks(ax, cats, th)
+        _xlim(ax, -0.25, n - 1 + 0.25)  # 柱宽 0.5 的最终范围,防折线轴共享侧扩张
 
         ax2 = ax.twinx()
         pos = _ease(p) * (n - 1) if n > 1 else 0.0
@@ -354,6 +367,7 @@ def _scatter_draw(title, xs, ys, th, name='数值', trend=False, labels=None):
                     ax.annotate(str(lb), (xs[i], ys[i]), textcoords='offset points',
                                 xytext=(0, 10), ha='center', fontsize=11, color=th['text'])
         _ylim(ax, ys, th)
+        _xlim(ax, min(xs), max(xs))  # 散点逐个出现,x 轴必须从首帧钉在最终范围
         handles = [Line2D([0], [0], linestyle='none', marker='o', markersize=12,
                           markerfacecolor=th['palette'][0], label=name)]
         if _has_spread(ys):
@@ -388,6 +402,7 @@ def _bubble_draw(title, xs, ys, sizes, th, name='数值', labels=None):
                     ax.annotate(str(lb), (xs[i], ys[i]), textcoords='offset points',
                                 xytext=(0, 10), ha='center', fontsize=11, color=th['text'])
         _ylim(ax, ys, th)
+        _xlim(ax, min(xs), max(xs))  # 同散点:气泡逐个出现,x 轴从首帧钉在最终范围
         _legend_bottom(ax, [Line2D([0], [0], linestyle='none', marker='o', markersize=12,
                                    markerfacecolor=th['palette'][0], label=name)], th)
     return draw
@@ -446,6 +461,7 @@ def _box_draw(title, series, th):
                 b.set_alpha(0.75)
         ax.set_xticks(range(1, n + 1))
         ax.set_xticklabels([nm for nm, _ in series])
+        ax.set_xlim(0.5, n + 0.5)  # 箱子逐个出现,x 轴从首帧钉在最终范围
         ax.set_ylim(lo - pad, hi + pad)
     return draw
 
@@ -461,8 +477,11 @@ def _heatmap_draw(title, rows, cols, arr, th, annotate=True):
     nr, nc = arr.shape
 
     def draw(ax, p):
-        pos = _ease(p) * nc  # 从左到右逐列显现(用逐格 alpha,避免全遮罩帧)
-        alpha = np.broadcast_to(np.arange(nc)[None, :] < pos, arr.shape).astype(float)
+        # 逐格 alpha 渐入:显现前沿 pos 线性推进(不用 _ease,前快后慢会留大段静止帧),
+        # 格 j 在 pos∈[j, j+1] 淡入,最后一格恰在 p=1 完成
+        pos = p * nc
+        alpha = np.broadcast_to(
+            np.clip(pos - np.arange(nc)[None, :], 0.0, 1.0), arr.shape).astype(float)
         im = ax.imshow(arr, cmap=cmap, vmin=vmin, vmax=vmax, aspect='auto', alpha=alpha)
         cb = ax.figure.colorbar(im, ax=ax, shrink=0.85)
         cb.ax.tick_params(labelsize=11, colors=th['text'])
@@ -482,16 +501,19 @@ def _heatmap_draw(title, rows, cols, arr, th, annotate=True):
         if annotate and nr * nc <= 25:
             for i in range(nr):
                 for j in range(nc):
-                    if j >= pos:
+                    a = float(alpha[i, j])
+                    if a <= 0:
                         continue
                     r, g, b, _ = cmap((arr[i, j] - vmin) / (vmax - vmin))
                     lum = 0.299 * r + 0.587 * g + 0.114 * b
                     ax.text(j, i, f'{arr[i, j]:g}', ha='center', va='center',
-                            fontsize=11, color='#000000' if lum > 0.55 else '#FFFFFF')
-        if p >= 0.98:  # 最大/最小格子描边
-            for idx in (imax, imin):
+                            fontsize=11, color='#000000' if lum > 0.55 else '#FFFFFF',
+                            alpha=a)
+        for idx in (imax, imin):  # 最大/最小格描边:随所在格一起淡入,不再末帧突现
+            a = float(alpha[idx[0], idx[1]])
+            if a > 0:
                 ax.add_patch(Rectangle((idx[1] - 0.5, idx[0] - 0.5), 1, 1, fill=False,
-                                       edgecolor=th['text'], linewidth=2.5))
+                                       edgecolor=th['text'], linewidth=2.5, alpha=a))
     return draw
 
 
@@ -508,14 +530,14 @@ def _waterfall_draw(title, cats, vals, th):
         for i, (c, v, base) in enumerate(bars):
             pr = _stagger(p, i, len(bars))
             ends.append(base + (v or 0.0))
-            if v is None:  # 合计柱
+            if v is None:  # 合计柱:从 0 画到代数和,负合计从 0 向下生长
                 col = th['hi_min']
-                bottom = base * pr if base >= 0 else base * (1 - pr)
+                bottom = base * pr if base < 0 else 0.0
                 h, text = abs(base) * pr, f'{base:g}'
             elif v >= 0:
                 col, bottom, h, text = th['palette'][0], base, v * pr, f'{v:g}'
-            else:
-                col, bottom, h, text = th['hi_max'], base + v * (1 - pr), abs(v) * pr, f'{v:g}'
+            else:  # 负值柱:顶端挂在上一累计水平,向下生长
+                col, bottom, h, text = th['hi_max'], base + v * pr, abs(v) * pr, f'{v:g}'
             if pr <= 0:
                 continue
             ax.bar(i, h, bottom=bottom, width=0.6, color=col)
@@ -529,6 +551,7 @@ def _waterfall_draw(title, cats, vals, th):
         lo, hi = min(levels), max(levels)
         pad = (hi - lo) * 0.12 or 1.0
         ax.set_ylim(lo - pad, hi + pad)
+        _xlim(ax, -0.3, len(bars) - 1 + 0.3)  # 柱宽 0.6 的最终范围,合计柱长出时轴不动
         _xticks(ax, [b[0] for b in bars], th)
     return draw
 
@@ -553,22 +576,33 @@ def _funnel_draw(title, cats, vals, th):
                 ax.text(1.02, i, f'{c} {v:g}{rate}', va='center', ha='left',
                         fontsize=13, color=th['text'])
         ax.set_xlim(0, 1.55)
+        ypad = 0.05 * (n - 1 + 0.72)  # 柱高 0.72 的 y 范围 + 5% 边距,轴从首帧固定
+        ax.set_ylim(-0.36 - ypad, n - 1 + 0.36 + ypad)
         ax.invert_yaxis()
     return draw
 
 
 # ---------- 渲染 ----------
 
-class _OncePillowWriter(animation.PillowWriter):
-    """GIF 播一遍停在末帧:不写 NETSCAPE 循环扩展,避免在 PPT 里无限重播。"""
+class _GifWriter(animation.PillowWriter):
+    """GIF 写入器:默认不写 NETSCAPE 循环扩展(播一遍停在末帧,PPT 里不重播);
+    loop=True 写入无限循环扩展。
+
+    Pillow 保存时静默丢弃与前一帧相同的帧并把其时长累加到保留帧(总播放时长
+    不变),分步生长的图表(如热力图)帧数少但节奏正确,此处无需重复处理。
+    """
+
+    def __init__(self, fps: float = 5, loop: bool = False, **kwargs):
+        super().__init__(fps=fps, **kwargs)
+        self._loop = loop
 
     def finish(self):
         self._frames[0].save(
             self.outfile, save_all=True, append_images=self._frames[1:],
-            duration=int(1000 / self.fps))
+            duration=int(1000 / self.fps), **({'loop': 0} if self._loop else {}))
 
 
-def _render(kind, title, draw, *, animate, fmt, out, out_dir=None,
+def _render(kind, title, draw, *, animate, fmt, out, out_dir=None, loop=False,
             polar: bool = False, figsize=None, dpi=None,
             th: dict | None = None) -> Path:
     th = th or {}
@@ -592,6 +626,9 @@ def _render(kind, title, draw, *, animate, fmt, out, out_dir=None,
                 raise ValueError(f'动画仅支持 {" / ".join(ANIMATED_FMTS)} 格式,收到 fmt={fmt!r};'
                                  f'静态图请用 animate=False(fmt 可选 {" / ".join(STATIC_FMTS)})')
             if fmt == 'mp4':
+                if loop:
+                    raise ValueError('loop 仅对 GIF 生效(MP4 是否循环由播放器决定);'
+                                     '请改用 fmt="gif" 或去掉 loop')
                 if not shutil.which('ffmpeg'):
                     raise RuntimeError('未找到 ffmpeg(MP4 需要)。'
                                        '安装:winget install Gyan.FFmpeg,或改用 fmt="gif"')
@@ -599,7 +636,7 @@ def _render(kind, title, draw, *, animate, fmt, out, out_dir=None,
                                                 extra_args=['-pix_fmt', 'yuv420p'])
                 path, fps, dpi_eff = out_path / f'{stem}.mp4', MP4_FPS, (dpi or DPI_MP4)
             else:
-                writer = _OncePillowWriter(fps=GIF_FPS)
+                writer = _GifWriter(fps=GIF_FPS, loop=loop)
                 path, fps, dpi_eff = out_path / f'{stem}.gif', GIF_FPS, (dpi or DPI_GIF)
 
             fig = plt.figure(figsize=fig_size, facecolor=fig_face)
@@ -618,6 +655,8 @@ def _render(kind, title, draw, *, animate, fmt, out, out_dir=None,
             if fmt not in STATIC_FMTS:
                 raise ValueError(f'静态图支持 {" / ".join(STATIC_FMTS)},收到 fmt={fmt!r};'
                                  '动画请传 animate=True(仅 gif / mp4)')
+            if loop:
+                raise ValueError('loop 仅对动画生效,需 animate=True(仅 gif)')
             path = out_path / f'{stem}.{fmt}'
             dpi_eff = dpi or (DPI_TIF if fmt == 'tif' else DPI_PNG)
             fig = plt.figure(figsize=fig_size, facecolor=fig_face)
@@ -702,30 +741,30 @@ def _theme(style: str | None) -> dict:
 
 # ---------- 公开 API ----------
 
-def bar(title: str, categories, values, *, style='business', animate=False, fmt=None,
+def bar(title: str, categories, values, *, style='business', animate=False, fmt=None, loop=False,
         out: str | None = None, out_dir=None, horizontal=False,
         figsize=None, dpi=None) -> Path:
     """柱状图(values 需 >=0):最大/最小高亮;horizontal=True 横向条形,animate=True 逐根升起。"""
     cats, vals = _validate(categories, values)
     th = _theme(style)
     return _render('bar', title, _bar_draw(title, cats, vals, th, horizontal),
-                   animate=animate, fmt=fmt, out=out, out_dir=out_dir,
+                   animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)
 
 
 def line(title: str, categories, values, *, name='销售额', style='business',
-         animate=False, fmt=None, out: str | None = None, out_dir=None,
+         animate=False, fmt=None, loop=False, out: str | None = None, out_dir=None,
          figsize=None, dpi=None) -> Path:
     """单系列折线:粗线大圆点,最大/最小高亮;animate=True 渐进绘制。"""
     cats, vals = _validate(categories, values)
     th = _theme(style)
     return _render('line', title, _line_draw(title, cats, vals, th, name=name),
-                   animate=animate, fmt=fmt, out=out, out_dir=out_dir,
+                   animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)
 
 
 def line_multi(title: str, categories, series, *, value_labels=True, style='business',
-               animate=False, fmt=None, out: str | None = None, out_dir=None,
+               animate=False, fmt=None, loop=False, out: str | None = None, out_dir=None,
                figsize=None, dpi=None) -> Path:
     """多系列折线:series=[(名称, 数值列表), ...],图例在顶部,可带数值标注。"""
     cats = [str(c) for c in categories]
@@ -733,94 +772,94 @@ def line_multi(title: str, categories, series, *, value_labels=True, style='busi
     th = _theme(style)
     return _render('line_multi', title,
                    _line_multi_draw(title, cats, ss, th, value_labels),
-                   animate=animate, fmt=fmt, out=out, out_dir=out_dir,
+                   animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)
 
 
 def area(title: str, categories, values, *, name='数值', style='business',
-         animate=False, fmt=None, out: str | None = None, out_dir=None,
+         animate=False, fmt=None, loop=False, out: str | None = None, out_dir=None,
          figsize=None, dpi=None) -> Path:
     """面积图:折线 + 半透明填充;animate=True 渐进填充。"""
     cats, vals = _validate(categories, values)
     th = _theme(style)
     return _render('area', title, _line_draw(title, cats, vals, th, fill=True, name=name),
-                   animate=animate, fmt=fmt, out=out, out_dir=out_dir,
+                   animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)
 
 
-def pie(title: str, categories, values, *, style='business', animate=False, fmt=None,
+def pie(title: str, categories, values, *, style='business', animate=False, fmt=None, loop=False,
         out: str | None = None, out_dir=None, figsize=None, dpi=None) -> Path:
     """饼图(values 需 >=0);animate=True 扇区展开。"""
     cats, vals = _validate(categories, values)
     th = _theme(style)
     return _render('pie', title, _pie_like_draw(title, cats, vals, th),
-                   animate=animate, fmt=fmt, out=out, out_dir=out_dir,
+                   animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)
 
 
 def donut(title: str, categories, values, *, show_values=True, style='business',
-          animate=False, fmt=None, out: str | None = None, out_dir=None,
+          animate=False, fmt=None, loop=False, out: str | None = None, out_dir=None,
           figsize=None, dpi=None) -> Path:
     """环形图:外部"类目 数值"标注 + 底部图例;animate=True 扇区展开。"""
     cats, vals = _validate(categories, values)
     th = _theme(style)
     return _render('donut', title, _pie_like_draw(title, cats, vals, th, donut=True,
                                                   show_values=show_values),
-                   animate=animate, fmt=fmt, out=out, out_dir=out_dir,
+                   animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)
 
 
 def radar(title: str, categories, series, *, style='business',
-          animate=False, fmt=None, out: str | None = None, out_dir=None,
+          animate=False, fmt=None, loop=False, out: str | None = None, out_dir=None,
           figsize=None, dpi=None) -> Path:
     """雷达图:series=[(名称, 数值列表), ...];animate=True 多边形从中心展开。"""
     cats = [str(c) for c in categories]
     ss = _validate_series(cats, series)
     th = _theme(style)
     return _render('radar', title, _radar_draw(title, cats, ss, th),
-                   animate=animate, fmt=fmt, out=out, out_dir=out_dir,
+                   animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    polar=True, th=th, figsize=figsize, dpi=dpi)
 
 
 def combo(title: str, categories, bar_values, line_values, *,
           bar_name='柱状', line_name='折线', style='business',
-          animate=False, fmt=None, out: str | None = None, out_dir=None,
+          animate=False, fmt=None, loop=False, out: str | None = None, out_dir=None,
           figsize=None, dpi=None) -> Path:
     """双轴组合图:柱状(左轴)+ 折线(右轴),animate=True 同步生长。"""
     cats, bv = _validate(categories, bar_values)
     _, lv = _validate(categories, line_values)
     th = _theme(style)
     draw = _combo_draw(title, cats, bv, lv, th, bar_name, line_name)
-    return _render('combo', title, draw, animate=animate, fmt=fmt, out=out,
+    return _render('combo', title, draw, animate=animate, fmt=fmt, loop=loop, out=out,
                    out_dir=out_dir, th=th, figsize=figsize, dpi=dpi)
 
 
 def bar_multi(title: str, categories, series, *, style='business',
-              animate=False, fmt=None, out: str | None = None, out_dir=None,
+              animate=False, fmt=None, loop=False, out: str | None = None, out_dir=None,
               figsize=None, dpi=None) -> Path:
     """多系列分组柱状图:series=[(名称, 数值列表), ...],图例在顶部。"""
     cats = [str(c) for c in categories]
     ss = _validate_series(cats, series)
     th = _theme(style)
     return _render('bar_multi', title, _bar_multi_draw(title, cats, ss, th),
-                   animate=animate, fmt=fmt, out=out, out_dir=out_dir,
+                   animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)
 
 
 def scatter(title: str, xs, ys, *, name='数值', trend=False, labels=None,
-            style='business', animate=False, fmt=None, out: str | None = None,
+            style='business', animate=False, fmt=None, loop=False, out: str | None = None,
             out_dir=None, figsize=None, dpi=None) -> Path:
     """散点图:x/y 均为数值列表;trend=True 加线性趋势线,labels 可标注每个点。"""
     x, y = _validate_xy(xs, ys)
     lbs = _validate_labels(labels, len(x))
     th = _theme(style)
     return _render('scatter', title, _scatter_draw(title, x, y, th, name, trend, lbs),
-                   animate=animate, fmt=fmt, out=out, out_dir=out_dir,
+                   animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)
 
 
 def bubble(title: str, xs, ys, sizes, *, name='数值', labels=None, style='business',
-           animate=False, fmt=None, out: str | None = None, out_dir=None,
+           animate=False, fmt=None, loop=False, out: str | None = None, out_dir=None,
            figsize=None, dpi=None) -> Path:
     """气泡图:scatter + sizes(气泡面积按 sizes 归一);颜色按点轮换主题色板。"""
     x, y = _validate_xy(xs, ys)
@@ -830,11 +869,11 @@ def bubble(title: str, xs, ys, sizes, *, name='数值', labels=None, style='busi
     lbs = _validate_labels(labels, len(x))
     th = _theme(style)
     return _render('bubble', title, _bubble_draw(title, x, y, sz, th, name, lbs),
-                   animate=animate, fmt=fmt, out=out, out_dir=out_dir,
+                   animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)
 
 
-def hist(title: str, values, *, bins=10, style='business', animate=False, fmt=None,
+def hist(title: str, values, *, bins=10, style='business', animate=False, fmt=None, loop=False,
          out: str | None = None, out_dir=None, figsize=None, dpi=None) -> Path:
     """直方图:values 为原始样本,bins 可为整数 / 'auto' / 分箱边界;最高频箱高亮。"""
     vals = [float(v) for v in values]
@@ -842,33 +881,33 @@ def hist(title: str, values, *, bins=10, style='business', animate=False, fmt=No
         raise ValueError('values 不能为空')
     th = _theme(style)
     return _render('hist', title, _hist_draw(title, vals, bins, th),
-                   animate=animate, fmt=fmt, out=out, out_dir=out_dir,
+                   animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)
 
 
-def box(title: str, series, *, style='business', animate=False, fmt=None,
+def box(title: str, series, *, style='business', animate=False, fmt=None, loop=False,
         out: str | None = None, out_dir=None, figsize=None, dpi=None) -> Path:
     """箱线图:series=[(组名, 原始样本), ...],各组样本数无需对齐;animate=True 箱体从中位数展开。"""
     ss = _validate_samples(series)
     th = _theme(style)
     return _render('box', title, _box_draw(title, ss, th),
-                   animate=animate, fmt=fmt, out=out, out_dir=out_dir,
+                   animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)
 
 
 def heatmap(title: str, rows, cols, values, *, annotate=True, style='business',
-            animate=False, fmt=None, out: str | None = None, out_dir=None,
+            animate=False, fmt=None, loop=False, out: str | None = None, out_dir=None,
             figsize=None, dpi=None) -> Path:
     """热力图:values 为 (行数 × 列数) 矩阵;色带取自主题,≤25 格自动标数值,最大/最小格描边。"""
     r, c, arr = _validate_matrix(rows, cols, values)
     th = _theme(style)
     return _render('heatmap', title, _heatmap_draw(title, r, c, arr, th, annotate),
-                   animate=animate, fmt=fmt, out=out, out_dir=out_dir,
+                   animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)
 
 
 def waterfall(title: str, categories, values, *, total=True, style='business',
-              animate=False, fmt=None, out: str | None = None, out_dir=None,
+              animate=False, fmt=None, loop=False, out: str | None = None, out_dir=None,
               figsize=None, dpi=None) -> Path:
     """瀑布图:values 为逐项增减(正=升/负=降),total=True 自动补"合计"柱。"""
     cats, vals = _validate(categories, values)
@@ -876,11 +915,11 @@ def waterfall(title: str, categories, values, *, total=True, style='business',
     return _render('waterfall', title,
                    _waterfall_draw(title, cats, list(vals) + [None] if total else list(vals),
                                    th),
-                   animate=animate, fmt=fmt, out=out, out_dir=out_dir,
+                   animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)
 
 
-def funnel(title: str, categories, values, *, style='business', animate=False, fmt=None,
+def funnel(title: str, categories, values, *, style='business', animate=False, fmt=None, loop=False,
            out: str | None = None, out_dir=None, figsize=None, dpi=None) -> Path:
     """漏斗图:按给定顺序从上到下,自动标注逐级转化率;values 需 >=0。"""
     cats, vals = _validate(categories, values)
@@ -888,5 +927,5 @@ def funnel(title: str, categories, values, *, style='business', animate=False, f
         raise ValueError('漏斗图 values 需 >=0')
     th = _theme(style)
     return _render('funnel', title, _funnel_draw(title, cats, vals, th),
-                   animate=animate, fmt=fmt, out=out, out_dir=out_dir,
+                   animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)

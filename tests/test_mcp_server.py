@@ -1,4 +1,4 @@
-"""M3 验收测试:MCP Server 协议级实测(stdio 子进程 + 官方客户端握手)。
+"""验收测试:MCP Server 协议级实测(stdio 子进程 + 官方客户端握手)。
 
 覆盖:tools/list 收敛为 2 个工具、make_chart 出图(静态 PNG 与动画 GIF)、
 list_themes 内容、数据校验错误的中文 ToolError。
@@ -69,6 +69,17 @@ def test_make_chart_animated_gif(tmp_path):
     assert data['animated'] is True
     p = Path(data['path'])
     assert p.suffix == '.gif' and p.exists() and p.stat().st_size > 0
+    p.unlink()
+
+
+def test_make_chart_gif_loop(tmp_path):
+    _, result = _call({
+        'type': 'line', 'title': '循环', 'categories': ['1月', '2月', '3月'],
+        'values': [10, 20, 15], 'animate': True, 'loop': True,
+        'out_dir': str(tmp_path)})
+    assert not result.is_error
+    p = Path(json.loads(result.content[0].text)['path'])
+    assert b'NETSCAPE2.0' in p.read_bytes()
     p.unlink()
 
 

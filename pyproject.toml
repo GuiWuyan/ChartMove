@@ -23,7 +23,7 @@ classifiers = [
 ]
 dependencies = [
     "matplotlib>=3.8",
-    "pillow>=10.0",
+    "pillow>=12.3",
     "mcp>=2.2.0",
     "openpyxl>=3.1",
     "pywin32>=306; sys_platform == 'win32'",

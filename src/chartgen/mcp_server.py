@@ -1,9 +1,7 @@
-"""MCP Server 入口(M3):把 chartgen 暴露给 AI / agent,stdio 传输。
-
+"""MCP Server 入口:把 chartgen 暴露给 AI / agent,stdio 传输。
 工具面收敛为 2 个(docs/plan.md 5.3):
     make_chart   生成图表,返回 JSON {path(绝对路径), file_size, type, style, animated}
     list_themes  列出 13 主题 × 4 风格包(名称 + 一句话描述)
-
 约定:工具 schema 描述用英文(LLM 选工具靠它);数据校验错误转 ToolError,消息保持中文;
 返回的 path 即交付物,桌宠/host 只需展示该文件;animate=true 默认出 GIF。
 """
@@ -62,7 +60,8 @@ server = MCPServer(
         'Call make_chart with the data; the returned "path" (absolute path to the '
         'image file) IS the deliverable - show/link that file to the user. '
         'Set animate=true to get a GIF that plays once and stops on the last frame '
-        '(chat-window friendly); use static png for documents. Errors are reported '
+        '(loop=true makes the GIF loop forever); '
+        'use static png for documents. Errors are reported '
         'in Chinese and mean the data was invalid - fix the data and retry.'
     ),
 )
@@ -91,7 +90,9 @@ def _norm_series(series) -> list[tuple[str, list[float]]]:
         'scatter/bubble: x + y (+sizes for bubble, +labels optional); '
         'hist: values = raw samples; box: series = [[group_name, [samples]], ...]; '
         'heatmap: rows + cols + matrix (2-D numeric). '
-        'animate=true gives a GIF (plays once, stops on last frame); '
+        'animate=true gives a GIF (plays once, stops on last frame by default; '
+        'loop=true makes it loop forever - GIF only, mp4 looping is decided by '
+        'the video player so loop=true with fmt=mp4 is rejected); '
         'fmt chooses png/pdf/tif for static or gif/mp4 for animated. '
         'Invalid data raises an error whose message is in Chinese.'
     ),
@@ -112,6 +113,7 @@ def make_chart(
     matrix: list[list[float]] | None = None,
     style: str = 'business',
     animate: bool = False,
+    loop: bool = False,
     fmt: Fmt | None = None,
     out: str | None = None,
     out_dir: str | None = None,
@@ -120,8 +122,8 @@ def make_chart(
     total: bool = True,
     bins: int | str = 10,
 ) -> str:
-    common: dict[str, Any] = dict(style=style, animate=animate, fmt=fmt, out=out,
-                                  out_dir=out_dir)
+    common: dict[str, Any] = dict(style=style, animate=animate, fmt=fmt, loop=loop,
+                                  out=out, out_dir=out_dir)
     try:
         # stdio 协议独占 stdout:内核里"图表已生成"等打印必须让道,否则污染 JSON-RPC 流
         with contextlib.redirect_stdout(sys.stderr):

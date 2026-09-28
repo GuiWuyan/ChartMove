@@ -1,4 +1,4 @@
-"""M1 冒烟测试:9 种图表类型 × PNG / GIF / MP4 全过(验收标准,docs/plan.md M1)。
+"""冒烟测试:9 种图表类型 × PNG / GIF / MP4 全过(验收标准,docs/plan.md M1)。
 
 另覆盖:pdf / tif 静态格式、8 主题、横向条形、figsize / dpi 参数、
 中文缺字检测与校验错误。产物写入 pytest 临时目录,断言后即删。
@@ -9,6 +9,8 @@ import shutil
 import warnings
 from pathlib import Path
 
+import matplotlib.pyplot as plt
+import numpy as np
 import pytest
 from PIL import Image
 
@@ -31,6 +33,24 @@ from chartgen import (
     radar,
     scatter,
     waterfall,
+)
+from chartgen.core import (
+    FRAMES,
+    GIF_FPS,
+    _bar_draw,
+    _bar_multi_draw,
+    _box_draw,
+    _bubble_draw,
+    _combo_draw,
+    _funnel_draw,
+    _heatmap_draw,
+    _hist_draw,
+    _line_draw,
+    _line_multi_draw,
+    _scatter_draw,
+    _stagger,
+    _theme,
+    _waterfall_draw,
 )
 from chartgen.themes import THEME_DESCS, THEME_LABELS, THEME_PACKS
 
@@ -115,6 +135,112 @@ def test_sketch_theme_animated(tmp_path):
     _assert_ok(path, 'gif', warns)
 
 
+def test_gif_default_plays_once(tmp_path):
+    """默认 GIF 不写 NETSCAPE 循环扩展:播一遍停在末帧(PPT 里不重播)。"""
+    path, warns = _render(bar, dict(SINGLE), tmp_path, animate=True, fmt='gif')
+    assert b'NETSCAPE2.0' not in path.read_bytes()
+    _assert_ok(path, 'gif', warns)
+
+
+def test_gif_loop_infinite(tmp_path):
+    """loop=True 写入 NETSCAPE 无限循环扩展。"""
+    path, warns = _render(bar, dict(SINGLE, loop=True), tmp_path,
+                          animate=True, fmt='gif')
+    assert b'NETSCAPE2.0' in path.read_bytes()
+    _assert_ok(path, 'gif', warns)
+
+
+def test_gif_total_duration_constant(tmp_path):
+    """Pillow 丢弃相同帧时会把时长累加到保留帧:任何图表 GIF 总时长恒为 48 帧 × 50ms,
+    分步生长的图(热力图等)帧数少但节奏不变。"""
+    path, _ = _render(heatmap, dict(rows=['r1', 'r2'], cols=['c1', 'c2'],
+                                    values=[[1, 2], [3, 4]]), tmp_path,
+                      animate=True, fmt='gif')
+    with Image.open(path) as im:
+        total = 0
+        for i in range(im.n_frames):
+            im.seek(i)
+            total += im.info['duration']
+        assert im.n_frames >= 40  # 逐格渐入后几乎每帧都有变化(修复前仅 ~6 帧)
+    assert total == FRAMES * int(1000 / GIF_FPS)
+
+
+def test_stagger_finishes_at_one():
+    """错峰动画的最后元素恰在 p=1 完成(修复前 p≈0.8~0.92 提前收尾,留下静止尾巴)。"""
+    for n in (2, 3, 4, 8, 16):
+        assert _stagger(1.0, n - 1, n) == 1.0
+        assert _stagger(0.95, n - 1, n) < 1.0  # 完成点若提前,p<1 时就会到 1
+        assert _stagger(0.0, n - 1, n) == 0.0
+
+
+def test_heatmap_reveal_and_stroke():
+    """热力图逐格渐入:最大/最小格描边随所在格淡入(p=0 无、p=1 全有),不再末帧突现。"""
+    arr = np.array([[1, 9, 2], [3, 5, 4]])  # 最大 9 在第 2 列,最小 1 在第 1 列
+    fig, ax = plt.subplots()
+    try:
+        draw = _heatmap_draw('t', ['r1', 'r2'], ['c1', 'c2', 'c3'], arr,
+                             _theme('business'))
+        draw(ax, 0.0)
+        assert len(ax.patches) == 0
+        ax.clear()
+        draw(ax, 1.0)
+        assert len(ax.patches) == 2  # 两条描边
+        assert all(not r.get_fill() for r in ax.patches)
+    finally:
+        plt.close(fig)
+
+
+def _stability_draws() -> dict:
+    """各图表的 draw 构建器(坐标轴稳定性回归用);pie/radar/heatmap 无此问题不列。"""
+    th = _theme('business')
+    cats, vals = ['Q1', 'Q2', 'Q3', 'Q4'], [120, 200, 90, 160]
+    series = [('销售额', [120, 200, 150, 260]), ('成本', [90, 120, 130, 110])]
+    xs, ys = [1, 2, 3, 4, 5, 6], [120, 200, 90, 160, 210, 150]
+    return {
+        'bar': lambda: _bar_draw('t', cats, vals, th),
+        'line': lambda: _line_draw('t', cats, vals, th),
+        'line_multi': lambda: _line_multi_draw('t', cats, series, th),
+        'combo': lambda: _combo_draw('t', cats, vals, [80, 140, 100, 180], th, '柱', '线'),
+        'bar_multi': lambda: _bar_multi_draw('t', cats, series, th),
+        'scatter': lambda: _scatter_draw('t', xs, ys, th),
+        'bubble': lambda: _bubble_draw('t', xs, ys, [10, 40, 5, 25, 35, 15], th),
+        'hist': lambda: _hist_draw('t', [68, 72, 70, 75, 77, 80, 82, 85], 8, th),
+        'box': lambda: _box_draw('t', [('组A', [3, 5, 4, 6, 7]), ('组B', [8, 9, 7])], th),
+        'waterfall': lambda: _waterfall_draw('t', cats, vals + [None], th),
+        'funnel': lambda: _funnel_draw('t', ['访问', '加购'], [1000, 420], th),
+    }
+
+
+def test_axes_limits_stable_during_animation():
+    """动画期间坐标轴固定:逐元素出现的图(散点/气泡/箱线/折线等)轴不得随数据扩张滑动。"""
+    fig, axes = plt.subplots(2, 6, figsize=(18, 6))
+    try:
+        for ax, (name, build) in zip(axes.flat, _stability_draws().items()):
+            draw = build()
+            draw(ax, 0.0)
+            lim0 = (tuple(ax.get_xlim()), tuple(ax.get_ylim()))
+            ax.clear()
+            draw(ax, 1.0)
+            lim1 = (tuple(ax.get_xlim()), tuple(ax.get_ylim()))
+            assert lim0 == lim1, f'{name} 坐标轴在动画中移动: {lim0} -> {lim1}'
+    finally:
+        plt.close(fig)
+
+
+def test_waterfall_geometry():
+    """瀑布图几何:正值柱从上一累计水平升起,负值柱向下悬挂,合计柱从 0 画到代数和(回归)。"""
+    fig, ax = plt.subplots()
+    try:
+        draw = _waterfall_draw('t', ['A', 'B', 'C'], [100, -40, 50, None],
+                               _theme('business'))
+        draw(ax, 1.0)  # 终态:p=1 时每个元素的错峰进度均为 1
+        rects = sorted(ax.patches, key=lambda r: r.get_x())
+        assert [(r.get_y(), r.get_height()) for r in rects] == pytest.approx(
+            [(0, 100), (60, 40), (60, 50), (0, 110)])
+    finally:
+        plt.close(fig)
+
+
 def test_theme_metadata():
     """13 主题分 4 包;每个主题都有中文名与一句话描述,包成员无遗漏无重复。"""
     assert len(THEMES) == 13
@@ -157,6 +283,17 @@ def test_static_rejects_animated_fmt(tmp_path):
 def test_animated_rejects_static_fmt(tmp_path):
     with pytest.raises(ValueError, match='动画仅支持'):
         bar('t', CATS, VALS, out_dir=tmp_path, animate=True, fmt='png')
+
+
+def test_loop_rejected_for_static(tmp_path):
+    with pytest.raises(ValueError, match='loop 仅对动画'):
+        bar('t', CATS, VALS, out_dir=tmp_path, loop=True)
+
+
+def test_loop_rejected_for_mp4(tmp_path):
+    """MP4 循环由播放器决定,loop=True + fmt='mp4' 直接报错(无需 ffmpeg)。"""
+    with pytest.raises(ValueError, match='loop 仅对 GIF'):
+        bar('t', CATS, VALS, out_dir=tmp_path, animate=True, fmt='mp4', loop=True)
 
 
 def test_mismatched_lengths():

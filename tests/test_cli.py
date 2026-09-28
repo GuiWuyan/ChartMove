@@ -1,4 +1,4 @@
-"""M2 验收测试:每种图表类型一条 CLI 命令出图 + themes 子命令 + 错误处理。
+"""验收测试:每种图表类型一条 CLI 命令出图 + themes 子命令 + 错误处理。
 
 进程内调用 cli.main(argv)(退出码约定:0 成功 / 1 生成失败),
 产物写入 pytest 临时目录并即测即删。
@@ -89,7 +89,21 @@ def test_gif_via_cli(tmp_path):
     _run(tmp_path, 'bar', 't', 'a=1', 'b=2', '--animate')
     f = tmp_path / 'bar_t.gif'
     assert f.exists() and f.stat().st_size > 0
+    assert b'NETSCAPE2.0' not in f.read_bytes()  # 默认播一遍停在末帧
     f.unlink()
+
+
+def test_gif_loop_via_cli(tmp_path):
+    _run(tmp_path, 'bar', 't', 'a=1', 'b=2', '--animate', '--loop')
+    f = tmp_path / 'bar_t.gif'
+    assert f.exists() and f.stat().st_size > 0
+    assert b'NETSCAPE2.0' in f.read_bytes()
+    f.unlink()
+
+
+def test_loop_without_animate_exit_1(tmp_path, capsys):
+    assert cli.main(['bar', 't', 'a=1', '--loop', '--out-dir', str(tmp_path)]) == 1
+    assert 'loop' in capsys.readouterr().err
 
 
 # ---------- --file:CSV / Excel 入参(M2.5) ----------

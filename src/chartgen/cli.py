@@ -101,7 +101,8 @@ def _figsize(text: str | None):
 
 def _common_kwargs(args) -> dict:
     return dict(style=args.style, animate=args.animate, fmt=args.fmt, out=args.out,
-                out_dir=args.out_dir, figsize=_figsize(args.figsize), dpi=args.dpi)
+                out_dir=args.out_dir, loop=args.loop,
+                figsize=_figsize(args.figsize), dpi=args.dpi)
 
 
 def _pairs_or_json(args) -> tuple[list[str], list[float]]:
@@ -352,6 +353,8 @@ def _build_parser() -> argparse.ArgumentParser:
     common.add_argument('--style', choices=list(THEMES), default='business',
                         help='主题(默认 business,chartgen themes 可查)')
     common.add_argument('--animate', action='store_true', help='生成动画(默认 GIF)')
+    common.add_argument('--loop', action='store_true',
+                        help='GIF 无限循环(默认播一遍停在末帧;MP4 循环由播放器决定,不支持)')
     common.add_argument('--fmt', choices=['png', 'gif', 'mp4', 'pdf', 'tif'], default=None,
                         help='输出格式;静态默认 png,动画默认 gif')
     common.add_argument('--out-dir', help='输出目录(默认 CHARTGEN_OUT_DIR 或 ./Results/)')

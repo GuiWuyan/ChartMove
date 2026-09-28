@@ -1,6 +1,7 @@
 # ChartGen(chartgen)
 
-**中文数据图表生成器 —— 人可用、AI 可调。** matplotlib 内核,16 种图表 × 13 主题(4 风格包),输出 PNG / PDF / TIF / GIF / MP4;入口为 CLI 与 MCP Server(AI / agent 调用)两个,未来作为桌宠 agent 的出图插件。原 PPT / PDF / Word 文档生成能力已移除;GUI 入口已取消(2026-09-27),PPT 由独立的 PPT Master 项目承担。
+**数据图表生成器** 
+matplotlib 内核,16 种图表 × 13 主题(4 风格包),输出 PNG / PDF / TIF / GIF / MP4;入口为 CLI 与 MCP Server(AI / agent 调用)
 
 ## 目录结构
 
@@ -32,6 +33,7 @@
 |---|---|
 | `--style` | 13 主题 × 4 风格包,默认 business;`chartgen themes` 列出全部 |
 | `--animate` | 出"数据生长"动画(默认 GIF,`--fmt mp4` 可出 MP4) |
+| `--loop` | 配合 `--animate`:GIF 无限循环(默认播一遍停在末帧;MP4 循环由播放器决定,不支持) |
 | `--fmt` | `png`(静态默认)/ `pdf` 矢量 / `tif` 600dpi / `gif`(动画默认)/ `mp4` |
 | `--out-dir` / `--out` | 输出目录(默认 `./Results/`)/ 输出文件名(默认 `类型_标题`) |
 | `--dpi` / `--figsize` | 分辨率 / 画幅 `宽x高`(如 `12.8x7.2`) |
@@ -64,7 +66,7 @@ stdio 传输,工具面收敛为 2 个;工具描述为英文(LLM 选工具靠它)
 
 | 工具 | 参数 | 返回 |
 |---|---|---|
-| `make_chart` | `type`(16 种枚举)、`title`、`categories` / `values`(单系列)、`series`(多系列)、`x` / `y` / `sizes`(散点 / 气泡)、`rows` / `cols` / `matrix`(热力图)、`style`(默认 business)、`animate`(默认 false,出 GIF)、`fmt`(png/pdf/tif/gif/mp4)、`out` / `out_dir` | JSON:`{path(绝对路径,即交付物), file_size, type, style, animated}` |
+| `make_chart` | `type`(16 种枚举)、`title`、`categories` / `values`(单系列)、`series`(多系列)、`x` / `y` / `sizes`(散点 / 气泡)、`rows` / `cols` / `matrix`(热力图)、`style`(默认 business)、`animate`(默认 false,出 GIF)、`loop`(默认 false,GIF 无限循环;仅 GIF 生效)、`fmt`(png/pdf/tif/gif/mp4)、`out` / `out_dir` | JSON:`{path(绝对路径,即交付物), file_size, type, style, animated}` |
 | `list_themes` | 无 | 13 主题 × 4 风格包:名称 + 中文标签 + 一句话描述 |
 
 ## 开发环境
@@ -89,7 +91,7 @@ CI:push / PR 自动跑 ruff lint + pytest smoke test,见 `.github/workflows/ci.y
   - **简约演示包**:`whitegrid` 白底网格 / `minimal` 纯极简无脊线 / `morandi` 莫兰迪低饱和
   - **其他风格包**:`sketch` 手绘草图(xkcd 式) / `terminal` 暗黑程序员 / `cyberpunk` 赛博朋克霓虹
   - 主题元数据 `THEME_PACKS` / `THEME_LABELS` / `THEME_DESCS` 供 CLI `themes` 子命令与 MCP `list_themes` 使用
-- 输出:PNG / PDF(矢量)/ TIF(600dpi,期刊投稿)/ GIF("数据生长"动画,播一遍停末帧,适配 PPT 放映与聊天窗)/ MP4(需 ffmpeg);`figsize` / `dpi` 参数化,默认 16:9 / 150dpi(1920×1080)
+- 输出:PNG / PDF(矢量)/ TIF(600dpi,期刊投稿)/ GIF("数据生长"动画,默认播一遍停末帧适配 PPT 放映与聊天窗,`--loop` / `loop=true` 可无限循环)/ MP4(需 ffmpeg,循环由播放器决定);`figsize` / `dpi` 参数化,默认 16:9 / 150dpi(1920×1080)
 - 差异化:最大/最小值自动高亮、y 轴智能从 0 起、中文字体零配置(Windows 雅黑 / macOS 苹方 / Linux Noto CJK,见 fonts.py)
 - 输出目录:默认项目内 `./Results/`(持久,不做 TTL 清理);优先级 `out_dir=` / `--out-dir` 参数 > 环境变量 `CHARTGEN_OUT_DIR` > 默认
 - 表格直读:CLI `--file` 支持 CSV(UTF-8 / GBK)与 Excel(.xlsx),见 table.py
