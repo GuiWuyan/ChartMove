@@ -1,0 +1,17 @@
+/.zcode/
+/.zcodeignore
+/node_modules/
+/.venv/
+/PPT/
+/FILE/
+/Cache/
+.idea/
+__pycache__/
+/scripts/
+/dist/
+/build/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+/Results/
+/config.json
