@@ -16,6 +16,7 @@ from typing import Any, Literal
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
+from . import __version__
 from .core import (
     area,
     bar,
@@ -34,6 +35,7 @@ from .core import (
     scatter,
     waterfall,
 )
+from .table import file_box_groups, file_columns, file_matrix, file_samples, file_xy
 from .themes import THEME_DESCS, THEME_LABELS, THEME_PACKS
 
 ChartType = Literal[
@@ -53,12 +55,13 @@ _XY_TYPES = ('scatter', 'bubble')
 
 server = MCPServer(
     name='chartgen',
-    version='0.1.0',
+    version=__version__,
     instructions=(
         'Chinese chart generator: 16 chart types x 13 themes, no font configuration '
         'needed, output is a persistent file. Use list_themes to discover styles. '
-        'Call make_chart with the data; the returned "path" (absolute path to the '
-        'image file) IS the deliverable - show/link that file to the user. '
+        'Call make_chart with inline data or a CSV/Excel file path (file param); '
+        'the returned "path" (absolute path to the image file) IS the deliverable - '
+        'show/link that file to the user. '
         'Set animate=true to get a GIF that plays once and stops on the last frame '
         '(loop=true makes the GIF loop forever); '
         'use static png for documents. Errors are reported '
@@ -90,12 +93,29 @@ def _norm_series(series) -> list[tuple[str, list[float]]]:
         'scatter/bubble: x + y (+sizes for bubble, +labels optional); '
         'hist: values = raw samples; box: series = [[group_name, [samples]], ...]; '
         'heatmap: rows + cols + matrix (2-D numeric). '
+        'file (optional): path to a CSV/Excel file (.csv/.xlsx, first row = header) '
+        'to read data from - takes precedence over inline data params. '
+        'cat_col / col select the category column / one value column '
+        '(header name or 1-based index). File column layout: '
+        'category charts use the 1st column as categories and the rest as value '
+        'columns (bar/line auto-upgrade to bar-multi/line-multi with >=2 value '
+        'columns; area/pie/donut/waterfall/funnel need col to pick one); '
+        'combo: 1st value col = bars, 2nd = line; '
+        'box: every column = one group of raw samples; '
+        'scatter/bubble: columns x, y (, sizes) (, labels); '
+        'hist: 1st column = raw samples; '
+        'heatmap: 1st column = row names, remaining columns = matrix. '
         'animate=true gives a GIF (plays once, stops on last frame by default; '
         'loop=true makes it loop forever - GIF only, mp4 looping is decided by '
         'the video player so loop=true with fmt=mp4 is rejected); '
         'sample=N (line/area/line-multi only) LTTB-downsamples large series '
         'to ~N points (shape-preserving) before rendering; '
         'fmt chooses png/pdf/tif for static or gif/mp4 for animated. '
+        'numfmt formats value labels and the value-axis ticks: auto (default) '
+        'renders >=1e4 as 万 and >=1e8 as 亿 (Chinese units), plain shows raw '
+        'numbers, percent appends % (data is already in percent units). '
+        'note (optional): footnote text rendered small at the bottom-left '
+        '(data source / remarks, consulting-report convention). '
         'Invalid data raises an error whose message is in Chinese.'
     ),
 )
@@ -124,14 +144,23 @@ def make_chart(
     total: bool = True,
     bins: int | str = 10,
     sample: int | None = None,
+    numfmt: Literal['auto', 'plain', 'percent'] = 'auto',
+    note: str | None = None,
+    file: str | None = None,
+    cat_col: str | None = None,
+    col: str | None = None,
 ) -> str:
     common: dict[str, Any] = dict(style=style, animate=animate, fmt=fmt, loop=loop,
-                                  out=out, out_dir=out_dir)
+                                  out=out, out_dir=out_dir, numfmt=numfmt, note=note)
     if type in ('line', 'area', 'line-multi'):  # sample 仅折线类支持
         common['sample'] = sample
     try:
         # stdio 协议独占 stdout:内核里"图表已生成"等打印必须让道,否则污染 JSON-RPC 流
         with contextlib.redirect_stdout(sys.stderr):
+            if file is not None:  # 文件数据优先于内联参数(与 CLI --file 一致)
+                return _from_file(type, title, file, cat_col, col, common,
+                                  horizontal=horizontal, trend=trend, total=total,
+                                  bins=bins)
             if type in _PAIR_TYPES:
                 _require(categories is not None and values is not None,
                          'categories 与 values 不能为空')
@@ -179,8 +208,58 @@ def make_chart(
                 return _result(heatmap(title, rows, cols, matrix, **common),
                                type, style, animate)
             raise ToolError(f'未知图表类型 {type!r},可选:{", ".join(_CHART_FNS)}')
-    except (ValueError, RuntimeError) as e:  # 中文校验消息 → ToolError
+    except (ValueError, RuntimeError, OSError) as e:  # 中文校验消息 → ToolError
         raise ToolError(str(e)) from e
+
+
+def _from_file(type, title, file, cat_col, col, common, *, horizontal, trend,
+               total, bins) -> str:
+    """file 数据出图:列约定与 CLI --file 一致,数据转换复用 table.py。"""
+
+    def done(path, type_name: str):
+        return _result(path, type_name, common['style'], common['animate'])
+
+    if type in ('bar', 'line'):
+        cats, cols = file_columns(file, cat_col, col)
+        _require(cols, 'file 至少需要 1 列数值')
+        if len(cols) >= 2:  # 多数值列自动升级为多系列(与 CLI --file 一致)
+            upgrade = 'bar-multi' if type == 'bar' else 'line-multi'
+            return done((bar_multi if type == 'bar' else line_multi)(
+                title, cats, cols, **common), upgrade)
+        if type == 'bar':
+            return done(bar(title, cats, cols[0][1], horizontal=horizontal, **common), type)
+        return done(line(title, cats, cols[0][1], name=cols[0][0], **common), type)
+    if type in ('area', 'pie', 'donut', 'waterfall', 'funnel'):
+        cats, cols = file_columns(file, cat_col, col)
+        _require(len(cols) == 1,
+                 f'{type} 只支持 1 列数值,file 里有 {len(cols)} 列(可用 col 挑 1 列)')
+        if type == 'waterfall':
+            return done(waterfall(title, cats, cols[0][1], total=total, **common), type)
+        return done(_CHART_FNS[type](title, cats, cols[0][1], **common), type)
+    if type == 'combo':
+        cats, cols = file_columns(file, cat_col, col)
+        _require(len(cols) == 2,
+                 f'combo 的 file 需要 2 列数值(第 1 列柱值、第 2 列折线值),'
+                 f'收到 {len(cols)} 列')
+        return done(combo(title, cats, cols[0][1], cols[1][1], **common), type)
+    if type in _SERIES_TYPES:  # line-multi / bar-multi / radar:各数值列 = 一个系列
+        cats, cols = file_columns(file, cat_col, col)
+        _require(cols, 'file 至少需要 1 列数值')
+        return done(_CHART_FNS[type](title, cats, cols, **common), type)
+    if type == 'box':
+        return done(box(title, file_box_groups(file), **common), type)
+    if type == 'hist':
+        return done(hist(title, file_samples(file), bins=bins, **common), type)
+    if type in _XY_TYPES:
+        xs, ys, sizes, labels = file_xy(file, sizes=type == 'bubble')
+        if type == 'bubble':
+            _require(sizes, 'bubble 的 file 需要第 3 列气泡大小')
+            return done(bubble(title, xs, ys, sizes, labels=labels, **common), type)
+        return done(scatter(title, xs, ys, trend=trend, labels=labels, **common), type)
+    if type == 'heatmap':
+        rlabels, col_names, matrix = file_matrix(file, cat_col)
+        return done(heatmap(title, rlabels, col_names, matrix, **common), type)
+    raise ToolError(f'未知图表类型 {type!r},可选:{", ".join(_CHART_FNS)}')
 
 
 def _result(path, chart_type: str, style: str, animated: bool) -> str:

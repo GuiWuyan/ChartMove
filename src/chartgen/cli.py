@@ -39,7 +39,7 @@ from .core import (
     scatter,
     waterfall,
 )
-from .table import read_table, to_float
+from .table import file_box_groups, file_columns, file_matrix, file_samples, file_xy
 from .themes import THEME_DESCS, THEME_LABELS, THEME_PACKS, THEMES
 
 _MULTI_TYPES = ('line-multi', 'bar-multi', 'radar')
@@ -101,7 +101,7 @@ def _figsize(text: str | None):
 
 def _common_kwargs(args) -> dict:
     return dict(style=args.style, animate=args.animate, fmt=args.fmt, out=args.out,
-                out_dir=args.out_dir, loop=args.loop,
+                out_dir=args.out_dir, loop=args.loop, numfmt=args.numfmt, note=args.note,
                 figsize=_figsize(args.figsize), dpi=args.dpi)
 
 
@@ -134,39 +134,14 @@ def _series_or_json(args):
     raise ValueError('请用 --categories + --series,或用 --data 传含 categories/series 的 JSON')
 
 
-def _col_index(spec, header, default):
-    """--cat-col / --col:表头名或从 1 数的序号;未指定返回 default。"""
-    if spec is None:
-        return default
-    if spec in header:
-        return header.index(spec)
-    try:
-        idx = int(spec) - 1
-    except ValueError:
-        raise ValueError(f'找不到列 {spec!r};可用列:{", ".join(header)}') from None
-    if not 0 <= idx < len(header):
-        raise ValueError(f'列序号 {spec} 超出范围,共 {len(header)} 列')
-    return idx
-
-
 def _file_cols(args, min_cols=1):
     """--file 数据:--cat-col 指定类目列(默认第 1 列),其余列为数值;
-    --col 可挑选 1 个数值列(表头名或序号)。返回 (类目, [(列名, 数值列表)], 表头)。"""
-    header, rows = read_table(args.file)
-    cat_i = _col_index(getattr(args, 'cat_col', None), header, 0)
-    cats = [r[cat_i] if len(r) > cat_i else '' for r in rows]
-    if getattr(args, 'col', None):
-        val_is = [_col_index(args.col, header, None)]
-    else:
-        val_is = [j for j in range(len(header)) if j != cat_i]
-    cols = []
-    for j in val_is:
-        nm = header[j] or f'列{j + 1}'
-        cols.append((nm, [to_float(r[j], f'(列「{nm}」)')
-                          for r in rows if len(r) > j and r[j] != '']))
+    --col 可挑选 1 个数值列(表头名或序号)。返回 (类目, [(列名, 数值列表)])。"""
+    cats, cols = file_columns(args.file, getattr(args, 'cat_col', None),
+                              getattr(args, 'col', None))
     if len(cols) < min_cols:
         raise ValueError(f'--file 至少需要 {min_cols} 列数值')
-    return cats, cols, header
+    return cats, cols
 
 
 def _one_col(cols, t):
@@ -180,7 +155,7 @@ def _one_col(cols, t):
 def _run_bar(fn, args):
     kw = _common_kwargs(args)
     if args.file:
-        cats, cols, _ = _file_cols(args)
+        cats, cols = _file_cols(args)
         if len(cols) >= 2:  # 多数值列自动升级为分组柱状图
             return bar_multi(args.title, cats, cols, **kw)
         _one_col(cols, 'bar')
@@ -192,7 +167,7 @@ def _run_bar(fn, args):
 def _run_line(fn, args):
     kw = _common_kwargs(args)
     if args.file:
-        cats, cols, _ = _file_cols(args)
+        cats, cols = _file_cols(args)
         if len(cols) >= 2:  # 多数值列自动升级为多系列折线
             return line_multi(args.title, cats, cols, **_sample_kw(args), **kw)
         _one_col(cols, 'line')
@@ -205,7 +180,7 @@ def _run_line(fn, args):
 def _run_waterfall(fn, args):
     kw = _common_kwargs(args)
     if args.file:
-        cats, cols, _ = _file_cols(args)
+        cats, cols = _file_cols(args)
         _one_col(cols, 'waterfall')
         return fn(args.title, cats, cols[0][1], total=not args.no_total, **kw)
     cats, vals = _pairs_or_json(args)
@@ -215,7 +190,10 @@ def _run_waterfall(fn, args):
 def _run_combo(fn, args):
     kw = _common_kwargs(args)
     if args.file:  # 类目列之后的第 1 列柱值、第 2 列折线值
-        cats, cols, _ = _file_cols(args, min_cols=2)
+        cats, cols = _file_cols(args, min_cols=2)
+        if len(cols) > 2:
+            raise ValueError(f'combo 的 --file 需要 2 列数值(第 1 列柱值、第 2 列折线值),'
+                             f'收到 {len(cols)} 列(可用 --col 挑选)')
         bvals, lvals = cols[0][1], cols[1][1]
     else:
         cats, bvals = _pairs_or_json(args)
@@ -227,7 +205,7 @@ def _run_combo(fn, args):
 def _run_multi(fn, args):
     kw = _common_kwargs(args)
     if args.file:
-        cats, cols, _ = _file_cols(args)
+        cats, cols = _file_cols(args)
         ss = cols
     else:
         cats, ss = _series_or_json(args)
@@ -238,13 +216,7 @@ def _run_multi(fn, args):
 def _run_box(fn, args):
     kw = _common_kwargs(args)
     if args.file:  # 每列一组,首行表头=组名,单元格为原始样本
-        header, rows = read_table(args.file)
-        groups = []
-        for j, name in enumerate(header):
-            samples = [to_float(r[j], f'(列「{name}」)')
-                       for r in rows if len(r) > j and r[j] != '']
-            groups.append((name or f'组{j + 1}', samples))
-        return fn(args.title, groups, **kw)
+        return fn(args.title, file_box_groups(args.file), **kw)
     if not args.series:
         raise ValueError('box 需要 --series(JSON)或 --file(CSV/Excel,每列一组)')
     return fn(args.title, _norm_series(_load_json(args.series)), **kw)
@@ -253,12 +225,8 @@ def _run_box(fn, args):
 def _run_xy(fn, args):
     kw = _common_kwargs(args)
     if args.file:  # 列顺序:x, y(, sizes)(, labels)
-        header, rows = read_table(args.file)
-        xs = [to_float(r[0], '(列 1)') for r in rows if r and r[0] != '']
-        ys = [to_float(r[1], '(列 2)') for r in rows if len(r) > 1 and r[1] != '']
-        labels = [r[3] for r in rows if len(r) > 3 and r[3]] or None
+        xs, ys, sizes, labels = file_xy(args.file, sizes=args.type == 'bubble')
         if args.type == 'bubble':
-            sizes = [to_float(r[2], '(列 3)') for r in rows if len(r) > 2 and r[2] != '']
             if not sizes:
                 raise ValueError('bubble 的 --file 需要第 3 列气泡大小')
             return fn(args.title, xs, ys, sizes, labels=labels, **kw)
@@ -281,11 +249,7 @@ def _run_hist(fn, args):
     bins = args.bins if args.bins == 'auto' else int(args.bins)
     kw = _common_kwargs(args)
     if args.file:
-        header, rows = read_table(args.file)
-        vals = [to_float(r[0], f'(列「{header[0]}」)') for r in rows if r and r[0] != '']
-        if not vals:
-            raise ValueError('--file 第 1 列需为数值样本')
-        return fn(args.title, vals, bins=bins, **kw)
+        return fn(args.title, file_samples(args.file), bins=bins, **kw)
     if args.data:
         vals = [float(v) for v in _load_json(args.data)['values']]
     elif getattr(args, 'items', None):
@@ -298,13 +262,9 @@ def _run_hist(fn, args):
 def _run_heatmap(fn, args):
     kw = _common_kwargs(args)
     if args.file:  # 类目列=行名(默认第 1 列),其余列为矩阵
-        header, rows = read_table(args.file)
-        cat_i = _col_index(getattr(args, 'cat_col', None), header, 0)
-        rlabels = [r[cat_i] if len(r) > cat_i else '' for r in rows]
-        val_is = [j for j in range(len(header)) if j != cat_i]
-        cols = [header[j] or f'列{j + 1}' for j in val_is]
-        matrix = [[to_float(r[j], f'(列「{header[j]}」)') for j in val_is] for r in rows]
-        return fn(args.title, rlabels, cols, matrix, annotate=not args.no_annotate, **kw)
+        rlabels, col_names, matrix = file_matrix(args.file, getattr(args, 'cat_col', None))
+        return fn(args.title, rlabels, col_names, matrix,
+                  annotate=not args.no_annotate, **kw)
     d = _load_json(args.data) if args.data else {}
     if not all(k in d for k in ('rows', 'cols', 'values')):
         raise ValueError('heatmap 需要 --file 或 --data(JSON 含 rows / cols / values 字段)')
@@ -315,7 +275,7 @@ def _run_heatmap(fn, args):
 def _default_run(fn, args):
     kw = _common_kwargs(args)
     if args.file:
-        cats, cols, _ = _file_cols(args)
+        cats, cols = _file_cols(args)
         _one_col(cols, args.type)
         return fn(args.title, cats, cols[0][1], **_sample_kw(args), **kw)
     cats, vals = _pairs_or_json(args)
@@ -367,6 +327,9 @@ def _build_parser() -> argparse.ArgumentParser:
     common.add_argument('--out', help='输出文件名(不含扩展名),默认 类型_标题')
     common.add_argument('--dpi', type=float, help='分辨率(默认静态 150 / tif 600 / GIF 75)')
     common.add_argument('--figsize', help='画幅 宽x高,如 12.8x7.2')
+    common.add_argument('--numfmt', choices=['auto', 'plain', 'percent'], default='auto',
+                        help="数值标签/刻度格式:auto 万/亿(默认)/ plain 原样 / percent 追加 %%")
+    common.add_argument('--note', help='底部脚注(数据来源 / 备注)')
     common.add_argument('--data', help='JSON 入参(内联字符串或文件路径),可替代位置数据')
     common.add_argument('--file', help='CSV / Excel 数据文件(.csv/.xlsx,首行为表头;'
                                        '第 1 列类目,其余列数值,多数值列 bar/line 自动转多系列)')
@@ -434,7 +397,7 @@ def main(argv=None) -> int:
     args = _build_parser().parse_args(argv)
     try:
         result = args.func(args)
-    except (ValueError, RuntimeError) as e:
+    except (ValueError, RuntimeError, OSError) as e:
         print(f'生成失败: {e}', file=sys.stderr)
         return 1
     if isinstance(result, int):  # themes 等子命令直接返回退出码

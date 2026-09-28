@@ -1,7 +1,7 @@
 """验收测试:MCP Server 协议级实测(stdio 子进程 + 官方客户端握手)。
 
-覆盖:tools/list 收敛为 2 个工具、make_chart 出图(静态 PNG 与动画 GIF)、
-list_themes 内容、数据校验错误的中文 ToolError。
+覆盖:tools/list 收敛为 2 个工具、make_chart 出图(静态 PNG 与动画 GIF,内联与
+file 数据)、list_themes 内容、数据校验错误的中文 ToolError。
 """
 from __future__ import annotations
 
@@ -97,3 +97,115 @@ def test_validation_error_chinese(tmp_path):
         'values': [1, 2, 3], 'out_dir': str(tmp_path)})
     assert result.is_error
     assert '长度一致' in result.content[0].text  # 中文报错,提示修数据重试
+
+
+# ---------- file 数据(CSV / Excel 直读,列约定与 CLI --file 对齐) ----------
+
+def _csv(tmp_path, text, name='d.csv'):
+    p = tmp_path / name
+    p.write_text(text, encoding='utf-8')
+    return str(p)
+
+
+def test_file_bar_single_col(tmp_path):
+    f = _csv(tmp_path, '类目,销量\nQ1,120\nQ2,200\n')
+    _, result = _call({'type': 'bar', 'title': '季度销量', 'file': f,
+                       'out_dir': str(tmp_path)})
+    assert not result.is_error
+    data = json.loads(result.content[0].text)
+    assert data['type'] == 'bar'
+    p = Path(data['path'])
+    assert p.exists() and p.stat().st_size > 0
+    p.unlink()
+
+
+def test_file_bar_auto_upgrade(tmp_path):
+    """多数值列自动升级为分组柱状图,返回的 type 如实报告。"""
+    f = _csv(tmp_path, '类目,线上,门店\nQ1,120,80\nQ2,200,90\n')
+    _, result = _call({'type': 'bar', 'title': '分组', 'file': f,
+                       'out_dir': str(tmp_path)})
+    assert not result.is_error
+    data = json.loads(result.content[0].text)
+    assert data['type'] == 'bar-multi'
+    assert Path(data['path']).stat().st_size > 0
+
+
+def test_file_combo_and_heatmap(tmp_path):
+    f = _csv(tmp_path, '月份,销量,客单价\n1月,120,86\n2月,200,92\n')
+    _, result = _call({'type': 'combo', 'title': '量价', 'file': f,
+                       'out_dir': str(tmp_path)})
+    assert not result.is_error
+    assert Path(json.loads(result.content[0].text)['path']).exists()
+
+    m = _csv(tmp_path, ',上午,下午\n周一,3,7\n周二,8,1\n', name='m.csv')
+    _, result = _call({'type': 'heatmap', 'title': '热力', 'file': m,
+                       'out_dir': str(tmp_path)})
+    assert not result.is_error
+    p = Path(json.loads(result.content[0].text)['path'])
+    assert p.exists() and p.stat().st_size > 0
+    p.unlink()
+
+
+def test_file_scatter_and_box(tmp_path):
+    f = _csv(tmp_path, 'x,y\n1,4\n2,6\n3,5\n', name='xy.csv')
+    _, result = _call({'type': 'scatter', 'title': '相关', 'file': f, 'trend': True,
+                       'out_dir': str(tmp_path)})
+    assert not result.is_error
+    assert Path(json.loads(result.content[0].text)['path']).exists()
+
+    b = _csv(tmp_path, '对照,实验\n3,2\n4,3\n5,4\n6,3\n', name='b.csv')
+    _, result = _call({'type': 'box', 'title': 'AB', 'file': b,
+                       'out_dir': str(tmp_path)})
+    assert not result.is_error
+    p = Path(json.loads(result.content[0].text)['path'])
+    assert p.exists() and p.stat().st_size > 0
+    p.unlink()
+
+
+def test_file_col_picks_value_column(tmp_path):
+    """pie 遇到 2 个数值列报错,用 col 挑 1 列后成功。"""
+    f = _csv(tmp_path, '类目,线上,门店\nQ1,120,80\nQ2,200,90\n')
+    _, result = _call({'type': 'pie', 'title': '占比', 'file': f,
+                       'out_dir': str(tmp_path)})
+    assert result.is_error
+    assert 'col' in result.content[0].text
+
+    _, result = _call({'type': 'pie', 'title': '占比', 'file': f, 'col': '门店',
+                       'out_dir': str(tmp_path)})
+    assert not result.is_error
+    p = Path(json.loads(result.content[0].text)['path'])
+    assert p.exists() and p.stat().st_size > 0
+    p.unlink()
+
+
+def test_file_missing_chinese_error(tmp_path):
+    _, result = _call({'type': 'bar', 'title': 't',
+                       'file': str(tmp_path / 'nope.csv'),
+                       'out_dir': str(tmp_path)})
+    assert result.is_error
+    assert '文件不存在' in result.content[0].text
+
+
+def test_numfmt_and_note(tmp_path):
+    """numfmt / note 透传:大数中文单位 + 脚注正常出图。"""
+    _, result = _call({
+        'type': 'bar', 'title': '大数', 'categories': ['a', 'b', 'c'],
+        'values': [12345678, 23456789, 8901234], 'note': '数据来源:单元测试',
+        'out_dir': str(tmp_path)})
+    assert not result.is_error
+    p = Path(json.loads(result.content[0].text)['path'])
+    assert p.exists() and p.stat().st_size > 0
+    p.unlink()
+
+
+def test_same_name_not_overwritten(tmp_path):
+    """同名产物自动加序号:两次调用返回不同路径,两个文件都在。"""
+    args = {'type': 'bar', 'title': 't', 'categories': ['a', 'b'],
+            'values': [1, 2], 'out_dir': str(tmp_path)}
+    _, r1 = _call(dict(args))
+    _, r2 = _call(dict(args))
+    p1 = json.loads(r1.content[0].text)['path']
+    p2 = json.loads(r2.content[0].text)['path']
+    assert p1 != p2 and Path(p1).exists() and Path(p2).exists()
+    assert p2.removesuffix('.png').endswith('_2')
+    Path(p1).unlink(), Path(p2).unlink()

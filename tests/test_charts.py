@@ -49,6 +49,7 @@ from chartgen.core import (
     _line_draw,
     _line_multi_draw,
     _lttb_indices,
+    _nf,
     _scatter_draw,
     _stagger,
     _theme,
@@ -391,6 +392,89 @@ def test_box_empty_samples():
 def test_funnel_negative_rejected():
     with pytest.raises(ValueError, match='漏斗图'):
         funnel('t', ['a', 'b'], [10, -5])
+
+
+def test_negative_values_rejected():
+    """负值校验契约:柱类与饼类从 0 起画,负值会静默出错误图,必须报中文错误。"""
+    with pytest.raises(ValueError, match='柱状图'):
+        bar('t', ['a', 'b'], [120, -30])
+    with pytest.raises(ValueError, match='柱状图'):
+        bar('t', ['a', 'b'], [120, -30], horizontal=True)
+    with pytest.raises(ValueError, match='饼图'):
+        pie('t', ['a', 'b'], [120, -30])
+    with pytest.raises(ValueError, match='环形图'):
+        donut('t', ['a', 'b'], [120, -30])
+    with pytest.raises(ValueError, match='多系列柱状图'):
+        bar_multi('t', ['a', 'b'], [('销售额', [120, -30])])
+    with pytest.raises(ValueError, match='combo'):
+        combo('t', ['a', 'b'], [120, -30], [80, 140])
+
+
+def test_numfmt_chinese_units():
+    """数值格式化:万/亿分级、负数、percent 追加、plain 原样。"""
+    assert _nf(500, _theme('business')) == '500'
+    assert _nf(12345, _theme('business')) == '1.2345万'
+    assert _nf(123456789, _theme('business')) == '1.23457亿'
+    assert _nf(-20000, _theme('business')) == '-2万'
+    assert _nf(9999, _theme('business')) == '9999'  # 万级门槛以下原样
+    assert _nf(6.1, _theme('business', 'percent')) == '6.1%'
+    assert _nf(123456, _theme('business', 'plain')) == '123456'
+
+
+def test_numfmt_and_note_render(tmp_path):
+    """numfmt / note 端到端:大数值 + 脚注正常出图。"""
+    big = dict(categories=CATS, values=[12345678, 23456789, 8901234, 45000000])
+    path, warns = _render(bar, big, tmp_path, note='数据来源:单元测试')
+    _assert_ok(path, 'png', warns)
+
+
+def test_vfmt_ticks_on_value_axis():
+    """刻度格式化落在数值轴:纵向柱 y 轴、横向柱 x 轴出现中文单位,类目轴不受影响。"""
+    for horizontal, value_axis in ((False, 'y'), (True, 'x')):
+        fig, ax = plt.subplots()
+        try:
+            draw = _bar_draw('t', ['甲', '乙'], [20000, 30000], _theme('business'), horizontal)
+            draw(ax, 1.0)
+            fig.canvas.draw()
+            axis = ax.yaxis if value_axis == 'y' else ax.xaxis
+            labels = [t.get_text() for t in axis.get_ticklabels()]
+            assert any('万' in lb for lb in labels), (horizontal, labels)
+        finally:
+            plt.close(fig)
+
+
+def test_nan_inf_rejected():
+    """nan / inf 静默渲染会产出 'inf亿' 标签,校验层必须拦截。"""
+    with pytest.raises(ValueError, match='nan'):
+        bar('t', ['a', 'b'], [1, float('nan')])
+    with pytest.raises(ValueError, match='inf'):
+        scatter('t', [1, float('inf')], [1, 2])
+    with pytest.raises(ValueError, match='nan'):
+        box('t', [('组A', [1, float('nan')])])
+    with pytest.raises(ValueError, match='nan'):
+        heatmap('t', ['r'], ['c'], [[float('nan')]])
+    with pytest.raises(ValueError, match='nan'):
+        hist('t', [1, 2, float('nan')])
+    with pytest.raises(ValueError, match='nan'):
+        bubble('t', [1, 2], [3, 4], [1, float('nan')])
+
+
+def test_same_name_not_overwritten(tmp_path):
+    """同名产物自动加序号(_2),不覆盖已有文件。"""
+    p1, _ = _render(bar, dict(SINGLE), tmp_path)
+    p2, _ = _render(bar, dict(SINGLE), tmp_path)
+    p3, _ = _render(bar, dict(SINGLE), tmp_path)
+    assert p1.exists() and p2.exists() and p3.exists()
+    assert p2.stem == p1.stem + '_2' and p3.stem == p1.stem + '_3'
+    p1.unlink(), p2.unlink(), p3.unlink()
+
+
+def test_same_name_not_overwritten_animated(tmp_path):
+    """动画路径(GIF)的同名不覆盖。"""
+    p1, _ = _render(bar, dict(SINGLE), tmp_path, animate=True, fmt='gif')
+    p2, _ = _render(bar, dict(SINGLE), tmp_path, animate=True, fmt='gif')
+    assert p1.exists() and p2.exists() and p2.stem == p1.stem + '_2'
+    p1.unlink(), p2.unlink()
 
 
 def test_mp4_missing_ffmpeg(monkeypatch, tmp_path):

@@ -28,7 +28,7 @@ from .core import (
 )
 from .themes import THEME_DESCS, THEME_LABELS, THEME_PACKS
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "bar", "line", "pie", "donut", "area", "combo", "line_multi", "bar_multi",

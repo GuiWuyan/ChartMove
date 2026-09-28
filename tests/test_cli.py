@@ -115,6 +115,14 @@ def test_line_sample_via_cli(tmp_path):
     _expect_file(tmp_path, 'line_大数据.png')
 
 
+def test_numfmt_and_note_via_cli(tmp_path):
+    """--numfmt / --note:大数中文单位 + 底部脚注正常出图。"""
+    _run(tmp_path, 'bar', '大数', 'a=12345678', 'b=23456789', '--note', '数据来源:测试')
+    _expect_file(tmp_path, 'bar_大数.png')
+    _run(tmp_path, 'line', '占比', 'a=1', 'b=2', '--numfmt', 'percent')
+    _expect_file(tmp_path, 'line_占比.png')
+
+
 # ---------- --file:CSV / Excel 入参(M2.5) ----------
 
 def _csv(tmp_path, name, text, encoding='utf-8'):

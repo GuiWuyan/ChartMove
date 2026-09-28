@@ -31,3 +31,13 @@ def safe_stem(kind: str, title: str, out: str | None = None) -> str:
     """文件名清洗:"类型_标题"(或显式 out)去非法字符,截断 60 字符。"""
     stem = re.sub(r'[\\/:*?"<>|\s]+', '_', out or f'{kind}_{title}').strip('_')[:60]
     return stem or 'chart'
+
+
+def next_path(p: Path) -> Path:
+    """同名不覆盖:目标已存在时自动追加序号(bar_t.png → bar_t_2.png → _3 ...)。"""
+    if not p.exists():
+        return p
+    i = 2
+    while (cand := p.with_name(f'{p.stem}_{i}{p.suffix}')).exists():
+        i += 1
+    return cand
