@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "chartgen"
 version = "0.1.0"
-description = "中文数据图表生成器:9 种图表 × 8 主题,输出 PNG/GIF/MP4,CLI / MCP / GUI 三入口"
+description = "中文数据图表生成器:16 种图表 × 13 主题,输出 PNG/PDF/TIF/GIF/MP4,CLI 与 MCP 双入口"
 readme = "README.md"
 authors = [{ name = "Quasar" }]
 requires-python = ">=3.10"

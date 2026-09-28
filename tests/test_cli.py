@@ -106,6 +106,15 @@ def test_loop_without_animate_exit_1(tmp_path, capsys):
     assert 'loop' in capsys.readouterr().err
 
 
+def test_line_sample_via_cli(tmp_path):
+    """--sample:600 行 CSV 降采样出图。"""
+    p = tmp_path / 'big.csv'
+    p.write_text('\n'.join(['日,值'] + [f'{i},{i % 13}' for i in range(600)]),
+                 encoding='utf-8')
+    _run(tmp_path, 'line', '大数据', '--file', str(p), '--sample', '60')
+    _expect_file(tmp_path, 'line_大数据.png')
+
+
 # ---------- --file:CSV / Excel 入参(M2.5) ----------
 
 def _csv(tmp_path, name, text, encoding='utf-8'):

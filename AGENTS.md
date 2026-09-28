@@ -1,23 +1,16 @@
-# AGENTS.md — AI 工作规则
+# AGENTS.md — chartgen 调用须知(面向使用本工具出图的 agent)
 
-本项目是中文数据图表生成器 `chartgen`:matplotlib 内核在 `src/chartgen/`,入口为 CLI 与 MCP(能力总览见 README,开发蓝图见 `docs/plan.md`)。
+chartgen 是中文数据图表生成器:16 种图表 × 13 主题(4 风格包),输出 PNG / PDF / TIF / GIF / MP4。入口只有两个:CLI 与 MCP Server(stdio)。
 
-## 硬性规范
+## 调用方式
 
-- Python 一律用 `.venv/Scripts/python.exe`;Node 侧无依赖,勿创建 package.json
-- 新增 Python 库:装进 .venv 并同步写入 requirements.txt(版本约束用 `>=`,禁用 `>`)
-- 图表产物写持久目录(默认项目内 `Results/`,可用 `--out-dir` / `out_dir=` 参数或 `CHARTGEN_OUT_DIR` 环境变量覆盖),绝不做 TTL 清理
-- 临时测试文件用完即删
-- GUI 已取消(2026-09-27),入口只有 CLI 与 MCP,勿再规划 GUI
-- 如果无法依赖现在的环境制作出成品,则反馈给用户原因并道歉
+- **CLI**:`chartgen <类型> "标题" [数据] [参数]`,如 `chartgen bar "季度产量" Q1=120 Q2=200`;全部参数看 `chartgen --help` 与 `chartgen bar --help`,数据写法与参数表见 README.md
+- **MCP**:工具 `make_chart`(出图)与 `list_themes`(列主题),参数以工具描述为准(英文);数据校验错误以中文 ToolError 返回,按提示改参重试
+- 出图结果 JSON 里的 `path`(绝对路径)即交付物,直接把它交给用户
+- 主题 / 参数拿不准就先跑 `chartgen themes` 或 MCP `list_themes`,不要凭空造参数
 
-## 技术红线(踩过的坑)
+## 硬性规则
 
-- `matplotlib.use('Agg')` 必须在 pyplot import 之前
-- 中文字体跨平台注册在 fonts.py,勿在别处硬编码字体路径;手绘风逐字回退必须把字体族列表直接给 `font.family`
-- MCP 用官方 SDK 2.x,服务端类是 `MCPServer`(旧教程的 `FastMCP` 写法已废弃);工具描述用英文写清楚参数,报错消息才用中文
-
-## 交付前必须验证(不过关不许交付)
-
-1. 每种用到的图表类型跑 smoke test:出图不抛异常、文件存在、主题与中文字体渲染正确(跑法:`.venv/Scripts/python.exe -m pytest`)
-2. 验证用的临时文件全部清理
+- 图表产物是持久交付物:默认写 `./Results/`,可用 `--out-dir` / `out_dir=` 参数或 `CHARTGEN_OUT_DIR` 环境变量覆盖;不做 TTL 清理,也不要删除或覆盖用户已有的产物
+- MP4 需要系统装有 ffmpeg,没有就改用 GIF;GIF 无额外依赖
+- 出现"未找到中文字体"警告说明中文会渲染成方框:Linux 安装 Noto Sans CJK(如 `fonts-noto-cjk` 包),Windows 需微软雅黑,装好后重新出图

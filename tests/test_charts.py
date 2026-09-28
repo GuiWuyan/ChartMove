@@ -42,11 +42,13 @@ from chartgen.core import (
     _box_draw,
     _bubble_draw,
     _combo_draw,
+    _downsample,
     _funnel_draw,
     _heatmap_draw,
     _hist_draw,
     _line_draw,
     _line_multi_draw,
+    _lttb_indices,
     _scatter_draw,
     _stagger,
     _theme,
@@ -225,6 +227,66 @@ def test_axes_limits_stable_during_animation():
             assert lim0 == lim1, f'{name} 坐标轴在动画中移动: {lim0} -> {lim1}'
     finally:
         plt.close(fig)
+
+
+def test_xticks_auto_thinning():
+    """类目 >25 自动抽稀到 ~10 个刻度(5000 类目标签不再叠成黑带),首尾保留。"""
+    th = _theme('business')
+    fig, ax = plt.subplots(figsize=(12.8, 7.2))
+    try:
+        _line_draw('t', [str(i) for i in range(5000)], list(range(5000)), th)(ax, 1.0)
+        ticks = [int(t) for t in ax.get_xticks()]
+        assert len(ticks) == 10
+        assert ticks[0] == 0 and ticks[-1] == 4999
+        labels = [t.get_text() for t in ax.get_xticklabels()]
+        assert labels[0] == '0' and labels[-1] == '4999'
+    finally:
+        plt.close(fig)
+    fig, ax = plt.subplots()
+    try:
+        _line_draw('t', [str(i) for i in range(25)], list(range(25)), th)(ax, 1.0)
+        assert len(ax.get_xticks()) == 25  # 阈值内不抽稀
+    finally:
+        plt.close(fig)
+
+
+def test_marker_thinning_markevery():
+    """折线点数 >50 时标记隔点绘制(markevery),≤50 保持逐点;线体不受影响。"""
+    th = _theme('business')
+    fig, ax = plt.subplots()
+    try:
+        _line_draw('t', [str(i) for i in range(100)], list(range(100)), th)(ax, 1.0)
+        assert ax.lines[0].get_markevery() == 2  # ceil(100 / 50)
+        ax.clear()
+        _line_draw('t', [str(i) for i in range(30)], list(range(30)), th)(ax, 1.0)
+        assert ax.lines[0].get_markevery() == 1
+    finally:
+        plt.close(fig)
+
+
+def test_lttb_and_downsample():
+    """LTTB 降采样:保首尾、点数达标、尖峰不丢;多系列取并集同步截取;越界值原样返回。"""
+    ys = [0.0] * 1000 + [100.0] + [0.0] * 1000
+    keep = _lttb_indices(ys, 100)
+    assert len(keep) == 100 and keep[0] == 0 and keep[-1] == 2000
+    assert 1000 in keep  # 尖峰必须保留
+    cats = [str(i) for i in range(1000)]
+    s1 = [float(i) for i in range(1000)]
+    s2 = [float(i % 7) for i in range(1000)]
+    c2, (o1, o2) = _downsample(cats, 100, [s1, s2])
+    assert len(c2) == len(o1) == len(o2) <= 300  # 并集 ≤ 各系列保留点之和
+    assert c2[0] == '0' and c2[-1] == '999' and o1[-1] == 999.0
+    c3, (o3,) = _downsample(cats[:50], 100, [s1[:50]])  # sample ≥ 点数:原样
+    assert c3 == cats[:50] and o3 == s1[:50]
+
+
+def test_line_big_data_sample(tmp_path):
+    """5000 行 + sample=300:降采样后正常出图(刻度自动抽稀,渲染速度快)。"""
+    cats = [str(i) for i in range(5000)]
+    vals = [float(i % 97) for i in range(5000)]
+    path, _ = _render(line, dict(categories=cats, values=vals, sample=300),
+                      tmp_path, fmt='png')
+    _assert_ok(path, 'png', [])
 
 
 def test_waterfall_geometry():

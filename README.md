@@ -6,10 +6,10 @@ matplotlib 内核,16 种图表 × 13 主题(4 风格包),输出 PNG / PDF / TIF 
 ## 目录结构
 
 ```
-├─ src/chartgen/     # 包:core 内核 + themes / fonts / output + cli / mcp_server(待 M3)
+├─ src/chartgen/     # 包:core 内核 + themes / fonts / output + cli / mcp_server
 ├─ tests/            # 16 图 × 3 输出 smoke test 矩阵 + CLI / 单元测试
 ├─ examples/         # make_all.py:一条命令生成全部 16 种示例图,兼任用法文档
-└─ docs/plan.md      # 开发方案
+└─ docs/             # plan.md 开发蓝图;development.md 开发者规范
 ```
 
 ## CLI
@@ -47,6 +47,7 @@ matplotlib 内核,16 种图表 × 13 主题(4 风格包),输出 PNG / PDF / TIF 
 | `bar` | `--horizontal` 横向条形(排名场景) |
 | `combo` | `--line` 折线值(逗号分隔)、`--bar-name` / `--line-name` 图例名 |
 | `line-multi` | `--no-value-labels` 关闭数值标注 |
+| `line` / `area` / `line-multi` | `--sample N` 大数据 LTTB 保形降采样到 ~N 点(数千行 CSV 出图;多系列取各系列保留点并集) |
 | `scatter` / `bubble` | `--x` `--y` 数值列表(逗号分隔)、`--trend` 趋势线、`--labels` 逐点标注、bubble 加 `--sizes` 气泡大小 |
 | `hist` | `--bins` 分箱数(整数或 `auto`) |
 | `waterfall` | `--no-total` 不追加合计柱 |
@@ -66,7 +67,7 @@ stdio 传输,工具面收敛为 2 个;工具描述为英文(LLM 选工具靠它)
 
 | 工具 | 参数 | 返回 |
 |---|---|---|
-| `make_chart` | `type`(16 种枚举)、`title`、`categories` / `values`(单系列)、`series`(多系列)、`x` / `y` / `sizes`(散点 / 气泡)、`rows` / `cols` / `matrix`(热力图)、`style`(默认 business)、`animate`(默认 false,出 GIF)、`loop`(默认 false,GIF 无限循环;仅 GIF 生效)、`fmt`(png/pdf/tif/gif/mp4)、`out` / `out_dir` | JSON:`{path(绝对路径,即交付物), file_size, type, style, animated}` |
+| `make_chart` | `type`(16 种枚举)、`title`、`categories` / `values`(单系列)、`series`(多系列)、`x` / `y` / `sizes`(散点 / 气泡)、`rows` / `cols` / `matrix`(热力图)、`style`(默认 business)、`animate`(默认 false,出 GIF)、`loop`(默认 false,GIF 无限循环;仅 GIF 生效)、`sample`(默认 null,仅折线类,LTTB 降采样目标点数)、`fmt`(png/pdf/tif/gif/mp4)、`out` / `out_dir` | JSON:`{path(绝对路径,即交付物), file_size, type, style, animated}` |
 | `list_themes` | 无 | 13 主题 × 4 风格包:名称 + 中文标签 + 一句话描述 |
 
 ## 开发环境
@@ -76,7 +77,7 @@ py -3.13 -m venv .venv                              # Python >=3.10
 .venv/Scripts/python.exe -m pip install -e ".[dev]" # 可编辑安装 + pytest/ruff
 .venv/Scripts/python.exe -m pytest                  # smoke test(全量约 1.5 分钟)
 .venv/Scripts/python.exe -m ruff check src tests examples
-python examples/make_all.py                         # 9 张示例图写入 ~/ChartGen/
+.venv/Scripts/python.exe examples/make_all.py        # 一次生成全部 16 张,默认写入 ./Results/
 winget install Gyan.FFmpeg                          # 可选,仅 MP4 动画需要
 ```
 
@@ -93,6 +94,7 @@ CI:push / PR 自动跑 ruff lint + pytest smoke test,见 `.github/workflows/ci.y
   - 主题元数据 `THEME_PACKS` / `THEME_LABELS` / `THEME_DESCS` 供 CLI `themes` 子命令与 MCP `list_themes` 使用
 - 输出:PNG / PDF(矢量)/ TIF(600dpi,期刊投稿)/ GIF("数据生长"动画,默认播一遍停末帧适配 PPT 放映与聊天窗,`--loop` / `loop=true` 可无限循环)/ MP4(需 ffmpeg,循环由播放器决定);`figsize` / `dpi` 参数化,默认 16:9 / 150dpi(1920×1080)
 - 差异化:最大/最小值自动高亮、y 轴智能从 0 起、中文字体零配置(Windows 雅黑 / macOS 苹方 / Linux Noto CJK,见 fonts.py)
+- 大数据:类目 >25 刻度自动抽稀、折线标记超 50 个隔点绘制;`line` / `area` / `line-multi` 支持 `--sample` / `sample=` LTTB 保形降采样(数千行 CSV 出图)
 - 输出目录:默认项目内 `./Results/`(持久,不做 TTL 清理);优先级 `out_dir=` / `--out-dir` 参数 > 环境变量 `CHARTGEN_OUT_DIR` > 默认
 - 表格直读:CLI `--file` 支持 CSV(UTF-8 / GBK)与 Excel(.xlsx),见 table.py
 

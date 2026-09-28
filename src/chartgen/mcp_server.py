@@ -93,6 +93,8 @@ def _norm_series(series) -> list[tuple[str, list[float]]]:
         'animate=true gives a GIF (plays once, stops on last frame by default; '
         'loop=true makes it loop forever - GIF only, mp4 looping is decided by '
         'the video player so loop=true with fmt=mp4 is rejected); '
+        'sample=N (line/area/line-multi only) LTTB-downsamples large series '
+        'to ~N points (shape-preserving) before rendering; '
         'fmt chooses png/pdf/tif for static or gif/mp4 for animated. '
         'Invalid data raises an error whose message is in Chinese.'
     ),
@@ -121,9 +123,12 @@ def make_chart(
     trend: bool = False,
     total: bool = True,
     bins: int | str = 10,
+    sample: int | None = None,
 ) -> str:
     common: dict[str, Any] = dict(style=style, animate=animate, fmt=fmt, loop=loop,
                                   out=out, out_dir=out_dir)
+    if type in ('line', 'area', 'line-multi'):  # sample 仅折线类支持
+        common['sample'] = sample
     try:
         # stdio 协议独占 stdout:内核里"图表已生成"等打印必须让道,否则污染 JSON-RPC 流
         with contextlib.redirect_stdout(sys.stderr):

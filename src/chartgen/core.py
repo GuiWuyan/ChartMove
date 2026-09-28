@@ -9,6 +9,8 @@
 
 约定:animate=True 出 GIF(默认)/ MP4,静态图 fmt='png'(默认)/'pdf'/'tif';
 GIF 默认播一遍停在末帧,loop=True 无限循环(MP4 是否循环由播放器决定);
+大数据:类目 >25 自动抽稀刻度、折线标记超 50 个隔点绘制,line/area/line-multi
+支持 sample=N 做 LTTB 保形降采样(数千行 CSV 出图用);
 产物默认写 ./Results/(持久,不做 TTL 清理);不播放动画的场景(如 Word)一律 PNG。
 """
 from __future__ import annotations
@@ -40,6 +42,9 @@ DPI_MP4 = 150
 DPI_TIF = 600           # 期刊投稿级
 GIF_FPS, MP4_FPS, FRAMES = 20, 24, 48
 HIGHLIGHT_SIZE = 650    # 最大/最小值高亮点大小(pt^2)
+THIN_TICKS_ABOVE = 25   # 类目超过此数,刻度自动抽稀(再多标签必然互相压盖)
+THIN_TICKS_KEEP = 10    # 抽稀后保留的刻度数(含首尾)
+MARKER_CAP = 50         # 折线标记数上限:超过则隔点绘制(markevery)
 
 STATIC_FMTS = ('png', 'pdf', 'tif')
 ANIMATED_FMTS = ('gif', 'mp4')
@@ -118,19 +123,63 @@ def _xlim(ax, lo: float, hi: float) -> None:
 
 
 def _xticks(ax, cats: list[str], th: dict) -> bool:
-    """设置类目刻度;标签多且长时旋转 30° 并加大下边距,返回是否发生了旋转。"""
-    xs = list(range(len(cats)))
+    """设置类目刻度;标签多且长时旋转 30° 并加大下边距,返回是否发生了旋转。
+    类目超过 THIN_TICKS_ABOVE 时均匀抽稀到 ~THIN_TICKS_KEEP 个刻度(含首尾),
+    避免大数据下标签叠成黑带。"""
+    n = len(cats)
+    if n > THIN_TICKS_ABOVE:
+        xs = sorted(set(np.linspace(0, n - 1, THIN_TICKS_KEEP).round().astype(int)))
+        labels = [cats[i] for i in xs]
+    else:
+        xs, labels = list(range(n)), list(cats)
     ax.set_xticks(xs)
-    if len(cats) > 6 and max(len(c) for c in cats) > 4:
-        ax.set_xticklabels(cats, rotation=30, ha='right')
+    if n > 6 and max(len(c) for c in labels) > 4:
+        ax.set_xticklabels(labels, rotation=30, ha='right')
         ax.figure.subplots_adjust(bottom=0.2)
         return True
-    ax.set_xticklabels(cats)
+    ax.set_xticklabels(labels)
     return False
 
 
 def _has_spread(vals: list[float]) -> bool:
     return len(vals) >= 2 and max(vals) != min(vals)
+
+
+def _marker_step(n: int) -> int:
+    """折线标记稀疏化:点数超过 MARKER_CAP 时每隔 k 点画一个标记(markevery),线体不变。"""
+    return max(1, math.ceil(n / MARKER_CAP))
+
+
+def _lttb_indices(ys, target: int) -> list[int]:
+    """LTTB(Largest-Triangle-Three-Buckets)降采样:保留首尾,其余各桶取与前后
+    参照点构成三角形面积最大的点,保形地抽到 ~target 个点(尖峰不丢)。"""
+    n = len(ys)
+    if target >= n or target < 3:
+        return list(range(n))
+    ys_ = np.asarray(ys, dtype=float)
+    keep, a = [0], 0
+    step = (n - 2) / (target - 2)
+    for i in range(1, target - 1):
+        s, e = int((i - 1) * step) + 1, int(i * step) + 1      # 当前候选桶 [s, e)
+        ns, ne = e, int((i + 1) * step) + 1                    # 下一桶(取均值作参照)
+        avg_x, avg_y = (ns + ne - 1) / 2, float(ys_[ns:ne].mean())
+        xs = np.arange(s, e)
+        area = np.abs((avg_x - a) * (ys_[s:e] - ys_[a]) - (xs - a) * (avg_y - ys_[a]))
+        a = s + int(np.argmax(area))
+        keep.append(a)
+    keep.append(n - 1)
+    return keep
+
+
+def _downsample(cats: list[str], sample: int | None,
+                series: list[list[float]]) -> tuple[list[str], list[list[float]]]:
+    """折线类大数据降采样:LTTB 保形抽稀;多系列取各系列保留索引的并集并同步截取,
+    保证类目与各系列长度一致。sample 缺省 / 不小于点数 / 小于 3 时原样返回。"""
+    n = len(cats)
+    if not sample or sample >= n or sample < 3:
+        return cats, series
+    idx = sorted(set().union(*(_lttb_indices(v, sample) for v in series)))
+    return [cats[i] for i in idx], [[v[i] for i in idx] for v in series]
 
 
 # ---------- 各图表的绘制函数(静态 = draw(ax, 1.0),动画 = draw(ax, p))----------
@@ -176,7 +225,8 @@ def _line_draw(title, cats, vals, th, fill=False, name='数值'):
             yr.append(vals[k] + frac * (vals[k + 1] - vals[k]))
         if fill:
             ax.fill_between(xr, yr, color=th['palette'][0], alpha=0.30)
-        ax.plot(xr, yr, color=th['palette'][0], linewidth=4, marker='o', markersize=16)
+        ax.plot(xr, yr, color=th['palette'][0], linewidth=4, marker='o', markersize=16,
+                markevery=_marker_step(n))
         if _has_spread(vals):
             for idx, c in ((vals.index(max(vals)), th['hi_max']),
                            (vals.index(min(vals)), th['hi_min'])):
@@ -208,7 +258,8 @@ def _line_multi_draw(title, cats, series, th, value_labels=True):
             if k + 1 < n:
                 xr.append(k + frac)
                 yr.append(vals[k] + frac * (vals[k + 1] - vals[k]))
-            ax.plot(xr, yr, color=c, linewidth=3, marker='o', markersize=9)
+            ax.plot(xr, yr, color=c, linewidth=3, marker='o', markersize=9,
+                    markevery=_marker_step(n))
             if value_labels and n <= 12:
                 for xi in range(k + 1):
                     ax.annotate(f'{vals[xi]:g}', (xi, vals[xi]), textcoords='offset points',
@@ -754,10 +805,12 @@ def bar(title: str, categories, values, *, style='business', animate=False, fmt=
 
 def line(title: str, categories, values, *, name='销售额', style='business',
          animate=False, fmt=None, loop=False, out: str | None = None, out_dir=None,
-         figsize=None, dpi=None) -> Path:
-    """单系列折线:粗线大圆点,最大/最小高亮;animate=True 渐进绘制。"""
+         sample: int | None = None, figsize=None, dpi=None) -> Path:
+    """单系列折线:粗线大圆点,最大/最小高亮;animate=True 渐进绘制;
+    sample=N 对大数据做 LTTB 保形降采样(数千行 CSV 出图用)。"""
     cats, vals = _validate(categories, values)
     th = _theme(style)
+    cats, (vals,) = _downsample(cats, sample, [list(vals)])
     return _render('line', title, _line_draw(title, cats, vals, th, name=name),
                    animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)
@@ -765,11 +818,14 @@ def line(title: str, categories, values, *, name='销售额', style='business',
 
 def line_multi(title: str, categories, series, *, value_labels=True, style='business',
                animate=False, fmt=None, loop=False, out: str | None = None, out_dir=None,
-               figsize=None, dpi=None) -> Path:
-    """多系列折线:series=[(名称, 数值列表), ...],图例在顶部,可带数值标注。"""
+               sample: int | None = None, figsize=None, dpi=None) -> Path:
+    """多系列折线:series=[(名称, 数值列表), ...],图例在顶部,可带数值标注;
+    sample=N 对大数据做 LTTB 保形降采样(各系列取保留索引并集,同步截取)。"""
     cats = [str(c) for c in categories]
     ss = _validate_series(cats, series)
     th = _theme(style)
+    cats, vals_list = _downsample(cats, sample, [vals for _, vals in ss])
+    ss = [(nm, vals) for (nm, _), vals in zip(ss, vals_list)]
     return _render('line_multi', title,
                    _line_multi_draw(title, cats, ss, th, value_labels),
                    animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
@@ -778,10 +834,12 @@ def line_multi(title: str, categories, series, *, value_labels=True, style='busi
 
 def area(title: str, categories, values, *, name='数值', style='business',
          animate=False, fmt=None, loop=False, out: str | None = None, out_dir=None,
-         figsize=None, dpi=None) -> Path:
-    """面积图:折线 + 半透明填充;animate=True 渐进填充。"""
+         sample: int | None = None, figsize=None, dpi=None) -> Path:
+    """面积图:折线 + 半透明填充;animate=True 渐进填充;
+    sample=N 对大数据做 LTTB 保形降采样。"""
     cats, vals = _validate(categories, values)
     th = _theme(style)
+    cats, (vals,) = _downsample(cats, sample, [list(vals)])
     return _render('area', title, _line_draw(title, cats, vals, th, fill=True, name=name),
                    animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)

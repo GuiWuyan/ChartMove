@@ -105,6 +105,11 @@ def _common_kwargs(args) -> dict:
                 figsize=_figsize(args.figsize), dpi=args.dpi)
 
 
+def _sample_kw(args) -> dict:
+    """--sample 仅 line / area / line-multi 支持:存在且非空时透传。"""
+    return {'sample': args.sample} if getattr(args, 'sample', None) else {}
+
+
 def _pairs_or_json(args) -> tuple[list[str], list[float]]:
     if args.data:
         d = _load_json(args.data)
@@ -189,11 +194,12 @@ def _run_line(fn, args):
     if args.file:
         cats, cols, _ = _file_cols(args)
         if len(cols) >= 2:  # 多数值列自动升级为多系列折线
-            return line_multi(args.title, cats, cols, **kw)
+            return line_multi(args.title, cats, cols, **_sample_kw(args), **kw)
         _one_col(cols, 'line')
-        return fn(args.title, cats, cols[0][1], name=cols[0][0], **kw)  # 图例名 = 列表头
+        return fn(args.title, cats, cols[0][1], name=cols[0][0],
+                  **_sample_kw(args), **kw)  # 图例名 = 列表头
     cats, vals = _pairs_or_json(args)
-    return fn(args.title, cats, vals, **kw)
+    return fn(args.title, cats, vals, **_sample_kw(args), **kw)
 
 
 def _run_waterfall(fn, args):
@@ -226,7 +232,7 @@ def _run_multi(fn, args):
     else:
         cats, ss = _series_or_json(args)
     vkw = {'value_labels': False} if getattr(args, 'no_value_labels', False) else {}
-    return fn(args.title, cats, ss, **vkw, **kw)
+    return fn(args.title, cats, ss, **vkw, **_sample_kw(args), **kw)
 
 
 def _run_box(fn, args):
@@ -311,9 +317,9 @@ def _default_run(fn, args):
     if args.file:
         cats, cols, _ = _file_cols(args)
         _one_col(cols, args.type)
-        return fn(args.title, cats, cols[0][1], **kw)
+        return fn(args.title, cats, cols[0][1], **_sample_kw(args), **kw)
     cats, vals = _pairs_or_json(args)
-    return fn(args.title, cats, vals, **kw)
+    return fn(args.title, cats, vals, **_sample_kw(args), **kw)
 
 
 _RUNNERS = {
@@ -403,6 +409,11 @@ def _build_parser() -> argparse.ArgumentParser:
         sps[name].add_argument('--categories', help='类目,逗号分隔(也可放进 --data JSON)')
     sps['line-multi'].add_argument('--no-value-labels', action='store_true',
                                    help='关闭数值标注')
+    sps['line'].add_argument('--sample', type=int,
+                             help='大数据降采样目标点数(LTTB 保形,如 300)')
+    sps['area'].add_argument('--sample', type=int, help='同 line:LTTB 降采样目标点数')
+    sps['line-multi'].add_argument('--sample', type=int,
+                                   help='同 line:LTTB 降采样(各系列取保留点并集)')
     sps['box'].add_argument('--series',
                             help='样本 JSON:[[组名, [样本...]], ...](与 --file 二选一)')
     for name in _XY_TYPES:
