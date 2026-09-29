@@ -35,7 +35,7 @@ from matplotlib.ticker import FuncFormatter
 
 from .fonts import setup_fonts, sketch_font_chain
 from .output import next_path, resolve_out_dir, safe_stem
-from .themes import THEMES
+from .themes import THEME_LABELS, THEMES
 
 setup_fonts()
 
@@ -183,6 +183,16 @@ def _note(fig, th: dict) -> None:
     if note:
         fig.text(0.01, 0.012, note, fontsize=11, color=th['text'],
                  alpha=0.55, ha='left', va='bottom')
+
+
+def _sketch_rc_extra(th: dict, fig_face: str) -> dict:
+    """手绘风格的 rc 覆盖:路径抖动 + 西文手写体;非 sketch 主题返回空 dict。"""
+    if not th.get('sketch'):
+        return {}
+    # 逐字回退必须把字体族列表直接给 font.family;泛型 sans-serif 只取首个命中
+    return {'path.sketch': (1, 100, 2),
+            'font.family': sketch_font_chain(),
+            'path.effects': [patheffects.withStroke(linewidth=3, foreground=fig_face)]}
 
 
 def _lttb_indices(ys, target: int) -> list[int]:
@@ -376,6 +386,39 @@ def _radar_draw(title, cats, series, th):
         _legend_bottom(ax, [Line2D([0], [0], color=th['palette'][si % len(th['palette'])],
                                    lw=3, marker='o', markersize=8, label=nm)
                             for si, (nm, _) in enumerate(series)], th)
+        # 极坐标圆等比,顶部必须预留标题空间,否则标题被裁
+        ax.figure.subplots_adjust(top=0.80)
+    return draw
+
+
+def _rose_draw(title, cats, vals, th):
+    """玫瑰图(Nightingale):极坐标柱状,半径即数值;第一扇区朝正上、顺时针。"""
+    n = len(vals)
+    thetas = [2 * math.pi * i / n for i in range(n)]
+    width = 2 * math.pi / n * 0.86  # 扇区间留缝
+
+    def draw(ax, p):
+        ax.set_facecolor(th['face'])  # 深色主题下避免露出白色圆形面板
+        ax.set_theta_offset(math.pi / 2)
+        ax.set_theta_direction(-1)
+        hs = [v * _stagger(p, i, n) for i, v in enumerate(vals)]
+        cols = [th['palette'][0]] * n
+        if _has_spread(vals):
+            cols[vals.index(max(vals))] = th['hi_max']
+            cols[vals.index(min(vals))] = th['hi_min']
+        ax.bar(thetas, hs, width=width, color=cols, edgecolor=th['face'], linewidth=1.5)
+        for i, t in enumerate(thetas):
+            if vals[i] > 0 and _stagger(p, i, n) > 0.5:
+                ax.text(t, hs[i] + max(vals) * 0.05, _nf(vals[i], th),
+                        ha='center', va='bottom', fontsize=12, color=th['text'])
+        ax.set_xticks(thetas)
+        ax.set_xticklabels(cats, fontsize=13, color=th['text'])
+        ax.tick_params(axis='x', pad=14)
+        ax.set_ylim(0, max(max(vals) * 1.18, 1))
+        ax.set_yticks([])  # 数值已逐扇区标注,半径刻度是噪声
+        ax.grid(color=th['grid_color'], linestyle=th['grid_ls'], linewidth=th['grid_lw'])
+        ax.spines['polar'].set_visible(False)
+        ax.set_title(title, fontsize=20, pad=24, color=th['text'])
         # 极坐标圆等比,顶部必须预留标题空间,否则标题被裁
         ax.figure.subplots_adjust(top=0.80)
     return draw
@@ -710,12 +753,7 @@ def _render(kind, title, draw, *, animate, fmt, out, out_dir=None, loop=False,
     th = th or {}
     face = th.get('face', 'white')
     fig_face = th.get('fig_face') or face
-    rc_extra: dict = {}
-    if th.get('sketch'):  # 手绘风:路径抖动 + 西文手写体
-        # 逐字回退必须把字体族列表直接给 font.family;泛型 sans-serif 只取首个命中
-        rc_extra = {'path.sketch': (1, 100, 2),
-                    'font.family': sketch_font_chain(),
-                    'path.effects': [patheffects.withStroke(linewidth=3, foreground=fig_face)]}
+    rc_extra = _sketch_rc_extra(th, fig_face)  # 手绘风:路径抖动 + 西文手写体
 
     with plt.rc_context(rc_extra):
         out_path = resolve_out_dir(out_dir)
@@ -873,6 +911,21 @@ def bar(title: str, categories, values, *, style='business', animate=False, fmt=
     return _render('bar', title, _bar_draw(title, cats, vals, th, horizontal),
                    animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)
+
+
+def rose(title: str, categories, values, *, style='business', animate=False, fmt=None,
+         loop=False, out: str | None = None, out_dir=None,
+         figsize=None, dpi=None, numfmt='auto',
+         note: str | None = None) -> Path:
+    """玫瑰图(Nightingale 极坐标柱状,values 需 >=0):半径即数值,构成/排名的圆形展示;
+    animate=True 逐扇区生长。"""
+    cats, vals = _validate(categories, values)
+    if min(vals) < 0:
+        raise ValueError('玫瑰图 values 需 >=0,含正负增减的数据请用 waterfall')
+    th = _theme(style, numfmt, note)
+    return _render('rose', title, _rose_draw(title, cats, vals, th),
+                   animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
+                   polar=True, th=th, figsize=figsize, dpi=dpi)
 
 
 def line(title: str, categories, values, *, name='销售额', style='business',
@@ -1084,3 +1137,27 @@ def funnel(title: str, categories, values, *, style='business', animate=False, f
     return _render('funnel', title, _funnel_draw(title, cats, vals, th),
                    animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)
+
+
+def themes_preview(*, out: str | None = None, out_dir=None, dpi=None) -> Path:
+    """主题预览拼版图:全部主题各画一组相同数据的迷你柱状图,一张 PNG 对比选风格。"""
+    cats, vals = ['一季度', '二季度', '三季度', '四季度'], [120, 200, 90, 160]
+    names = list(THEMES)
+    cols, rows = 4, math.ceil(len(names) / 4)
+    fig = plt.figure(figsize=(cols * 4.2, rows * 2.9), facecolor='white')
+    for i, name in enumerate(names):
+        th = _theme(name)
+        ax = fig.add_subplot(rows, cols, i + 1, facecolor=th.get('fig_face') or th['face'])
+        with plt.rc_context(_sketch_rc_extra(th, 'white')):
+            _bar_draw(THEME_LABELS[name], cats, vals, th)(ax, 1.0)
+        # 格标题落在白色图底上,固定深灰(主题正文色在深色主题下是浅色,会看不清)
+        ax.set_title(f'{THEME_LABELS[name]} · {name}', fontsize=13, color='#333333', pad=8)
+    for j in range(len(names), rows * cols):
+        fig.add_subplot(rows, cols, j + 1).axis('off')
+    fig.subplots_adjust(left=0.04, right=0.985, top=0.93, bottom=0.04,
+                        hspace=0.62, wspace=0.22)
+    path = next_path(resolve_out_dir(out_dir) / f'{safe_stem("themes", "预览", out)}.png')
+    fig.savefig(path, dpi=dpi or DPI_PNG, facecolor='white')
+    plt.close(fig)
+    print(f'主题预览图已生成: {path}')
+    return path

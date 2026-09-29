@@ -1,4 +1,4 @@
-"""冒烟测试:16 种图表类型 × PNG / GIF / MP4 全过。
+"""冒烟测试:17 种图表类型 × PNG / GIF / MP4 全过。
 
 另覆盖:pdf / tif 静态格式、8 主题、横向条形、figsize / dpi 参数、
 中文缺字检测与校验错误。产物写入 pytest 临时目录,断言后即删。
@@ -31,6 +31,7 @@ from chartgen import (
     line_multi,
     pie,
     radar,
+    rose,
     scatter,
     waterfall,
 )
@@ -90,6 +91,7 @@ CASES: dict[str, tuple] = {
     'waterfall': (waterfall, dict(categories=CATS, values=[120, -30, 50, -20])),
     'funnel': (funnel, dict(categories=['访问', '加购', '下单', '付款'],
                             values=[1000, 420, 180, 120])),
+    'rose': (rose, dict(SINGLE)),
 }
 
 
@@ -113,7 +115,7 @@ def _assert_ok(path: Path, ext: str, warns: list[str]) -> None:
 @pytest.mark.parametrize('fmt', ['png', 'gif', 'mp4'])
 @pytest.mark.parametrize('name', list(CASES))
 def test_matrix(name, fmt, tmp_path):
-    """验收主体:16 种类型 × 3 种输出。"""
+    """验收主体:17 种类型 × 3 种输出。"""
     if fmt == 'mp4' and not HAS_FFMPEG:
         pytest.skip('未安装 ffmpeg,跳过 MP4')
     fn, kw = CASES[name]
@@ -408,6 +410,8 @@ def test_negative_values_rejected():
         bar_multi('t', ['a', 'b'], [('销售额', [120, -30])])
     with pytest.raises(ValueError, match='combo'):
         combo('t', ['a', 'b'], [120, -30], [80, 140])
+    with pytest.raises(ValueError, match='玫瑰图'):
+        rose('t', ['a', 'b'], [120, -30])
 
 
 def test_numfmt_chinese_units():

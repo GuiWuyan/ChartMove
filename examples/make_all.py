@@ -1,7 +1,7 @@
-"""一条命令生成全部 16 种示例图,兼任用法文档(默认写入项目 ./Results/)。
+"""一条命令生成全部 17 种示例图,兼任用法文档(默认写入项目 ./Results/)。
 
-    python examples/make_all.py                # 16 张 PNG,主题按序轮换
-    python examples/make_all.py --animate      # 16 张 GIF(数据生长动画)
+    python examples/make_all.py                # 17 张 PNG,主题按序轮换
+    python examples/make_all.py --animate      # 17 张 GIF(数据生长动画)
     python examples/make_all.py --out-dir D:/tmp/charts
 """
 from __future__ import annotations
@@ -24,6 +24,7 @@ from chartgen import (
     line_multi,
     pie,
     radar,
+    rose,
     scatter,
     waterfall,
 )
@@ -38,7 +39,7 @@ MATRIX = [[3, 7, 2, 5], [8, 1, 6, 4], [2, 5, 9, 3], [6, 2, 4, 8]]
 
 
 def make_all(out_dir=None, animate=False) -> list:
-    """依次生成 16 种类型,主题按序轮换,顺带展示 13 套风格。"""
+    """依次生成 17 种类型,主题按序轮换,顺带展示 13 套风格。"""
     styles = list(THEMES)
 
     def at(i):
@@ -79,11 +80,13 @@ def make_all(out_dir=None, animate=False) -> list:
                   animate=animate, out_dir=out_dir),
         funnel('转化漏斗', ['访问', '加购', '下单', '付款'], [1000, 420, 180, 120],
                style=at(15), animate=animate, out_dir=out_dir),
+        rose('品类销量玫瑰图', ['手机', '电脑', '平板', '配件'], [320, 210, 150, 90],
+             style=at(16), animate=animate, out_dir=out_dir),
     ]
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description='生成全部 16 种示例图(默认写 ./Results/)')
+    ap = argparse.ArgumentParser(description='生成全部 17 种示例图(默认写 ./Results/)')
     ap.add_argument('--out-dir', default=None, help='输出目录(默认 CHARTGEN_OUT_DIR 或 ./Results)')
     ap.add_argument('--animate', action='store_true', help='出 GIF 动画(默认 PNG)')
     args = ap.parse_args()

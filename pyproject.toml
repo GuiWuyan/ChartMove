@@ -5,8 +5,10 @@ build-backend = "hatchling.build"
 [project]
 name = "chartgen"
 dynamic = ["version"]
-description = "中文数据图表生成器:16 种图表 × 13 主题,输出 PNG/PDF/TIF/GIF/MP4,CLI 与 MCP 双入口"
+description = "中文数据图表生成器:17 种图表 × 13 主题,输出 PNG/PDF/TIF/GIF/MP4,CLI 与 MCP 双入口"
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [{ name = "Quasar" }]
 requires-python = ">=3.10"
 keywords = ["chart", "matplotlib", "chinese", "mcp", "gif", "animation"]

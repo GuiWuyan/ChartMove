@@ -10,6 +10,7 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
@@ -42,7 +43,7 @@ def test_tools_listed():
     assert set(schema['properties']['type']['enum']) == {
         'bar', 'line', 'line-multi', 'area', 'pie', 'donut', 'combo', 'bar-multi',
         'radar', 'scatter', 'bubble', 'hist', 'box', 'heatmap', 'waterfall',
-        'funnel'}
+        'funnel', 'rose'}
 
 
 def test_make_chart_bar_png(tmp_path):
@@ -184,6 +185,26 @@ def test_file_missing_chinese_error(tmp_path):
                        'out_dir': str(tmp_path)})
     assert result.is_error
     assert '文件不存在' in result.content[0].text
+
+
+def test_file_sheet_and_rose(tmp_path):
+    """sheet 按 Excel 工作表名取数;rose 走文件单数值列。"""
+    op = pytest.importorskip('openpyxl')
+    p = tmp_path / 'm.xlsx'
+    wb = op.Workbook()
+    wb.active.append(['类目', '销量'])
+    wb.active.append(['Q1', 120])
+    ws2 = wb.create_sheet('2024')
+    ws2.append(['类目', '销量'])
+    ws2.append(['手机', 320])
+    ws2.append(['电脑', 210])
+    wb.save(p)
+    _, result = _call({'type': 'rose', 'title': '品类玫瑰', 'file': str(p),
+                       'sheet': '2024', 'out_dir': str(tmp_path)})
+    assert not result.is_error
+    data = json.loads(result.content[0].text)
+    assert data['type'] == 'rose'
+    assert Path(data['path']).stat().st_size > 0
 
 
 def test_numfmt_and_note(tmp_path):

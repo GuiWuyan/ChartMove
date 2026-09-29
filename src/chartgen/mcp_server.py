@@ -32,7 +32,9 @@ from .core import (
     line_multi,
     pie,
     radar,
+    rose,
     scatter,
+    themes_preview,
     waterfall,
 )
 from .table import file_box_groups, file_columns, file_matrix, file_samples, file_xy
@@ -40,16 +42,17 @@ from .themes import THEME_DESCS, THEME_LABELS, THEME_PACKS
 
 ChartType = Literal[
     'bar', 'line', 'line-multi', 'area', 'pie', 'donut', 'combo', 'bar-multi',
-    'radar', 'scatter', 'bubble', 'hist', 'box', 'heatmap', 'waterfall', 'funnel']
+    'radar', 'scatter', 'bubble', 'hist', 'box', 'heatmap', 'waterfall', 'funnel',
+    'rose']
 Fmt = Literal['png', 'pdf', 'tif', 'gif', 'mp4']
 
 _CHART_FNS = {
     'bar': bar, 'line': line, 'line-multi': line_multi, 'area': area, 'pie': pie,
     'donut': donut, 'combo': combo, 'bar-multi': bar_multi, 'radar': radar,
     'scatter': scatter, 'bubble': bubble, 'hist': hist, 'box': box,
-    'heatmap': heatmap, 'waterfall': waterfall, 'funnel': funnel,
+    'heatmap': heatmap, 'waterfall': waterfall, 'funnel': funnel, 'rose': rose,
 }
-_PAIR_TYPES = ('bar', 'line', 'area', 'pie', 'donut', 'waterfall', 'funnel')
+_PAIR_TYPES = ('bar', 'line', 'area', 'pie', 'donut', 'waterfall', 'funnel', 'rose')
 _SERIES_TYPES = ('line-multi', 'bar-multi', 'radar')
 _XY_TYPES = ('scatter', 'bubble')
 
@@ -57,7 +60,7 @@ server = MCPServer(
     name='chartgen',
     version=__version__,
     instructions=(
-        'Chinese chart generator: 16 chart types x 13 themes, no font configuration '
+        'Chinese chart generator: 17 chart types x 13 themes, no font configuration '
         'needed, output is a persistent file. Use list_themes to discover styles. '
         'Call make_chart with inline data or a CSV/Excel file path (file param); '
         'the returned "path" (absolute path to the image file) IS the deliverable - '
@@ -88,7 +91,7 @@ def _norm_series(series) -> list[tuple[str, list[float]]]:
         'Returns JSON string: {path (absolute path, THE deliverable), file_size, '
         'type, style, animated}. Data params by type - '
         'category charts (bar/line/line-multi/area/pie/donut/combo/bar-multi/radar/'
-        'waterfall/funnel): categories + values, or series=[[name, [values]], ...] '
+        'rose/waterfall/funnel): categories + values, or series=[[name, [values]], ...] '
         'for multi-series (combo also needs line_values); '
         'scatter/bubble: x + y (+sizes for bubble, +labels optional); '
         'hist: values = raw samples; box: series = [[group_name, [samples]], ...]; '
@@ -96,10 +99,12 @@ def _norm_series(series) -> list[tuple[str, list[float]]]:
         'file (optional): path to a CSV/Excel file (.csv/.xlsx, first row = header) '
         'to read data from - takes precedence over inline data params. '
         'cat_col / col select the category column / one value column '
-        '(header name or 1-based index). File column layout: '
+        '(header name or 1-based index). '
+        'sheet (Excel only, optional): worksheet name or 1-based index, '
+        'default first sheet; ignored for CSV. File column layout: '
         'category charts use the 1st column as categories and the rest as value '
         'columns (bar/line auto-upgrade to bar-multi/line-multi with >=2 value '
-        'columns; area/pie/donut/waterfall/funnel need col to pick one); '
+        'columns; area/pie/donut/rose/waterfall/funnel need col to pick one); '
         'combo: 1st value col = bars, 2nd = line; '
         'box: every column = one group of raw samples; '
         'scatter/bubble: columns x, y (, sizes) (, labels); '
@@ -149,6 +154,7 @@ def make_chart(
     file: str | None = None,
     cat_col: str | None = None,
     col: str | None = None,
+    sheet: str | None = None,
 ) -> str:
     common: dict[str, Any] = dict(style=style, animate=animate, fmt=fmt, loop=loop,
                                   out=out, out_dir=out_dir, numfmt=numfmt, note=note)
@@ -158,7 +164,7 @@ def make_chart(
         # stdio 协议独占 stdout:内核里"图表已生成"等打印必须让道,否则污染 JSON-RPC 流
         with contextlib.redirect_stdout(sys.stderr):
             if file is not None:  # 文件数据优先于内联参数(与 CLI --file 一致)
-                return _from_file(type, title, file, cat_col, col, common,
+                return _from_file(type, title, file, cat_col, col, sheet, common,
                                   horizontal=horizontal, trend=trend, total=total,
                                   bins=bins)
             if type in _PAIR_TYPES:
@@ -212,7 +218,7 @@ def make_chart(
         raise ToolError(str(e)) from e
 
 
-def _from_file(type, title, file, cat_col, col, common, *, horizontal, trend,
+def _from_file(type, title, file, cat_col, col, sheet, common, *, horizontal, trend,
                total, bins) -> str:
     """file 数据出图:列约定与 CLI --file 一致,数据转换复用 table.py。"""
 
@@ -220,7 +226,7 @@ def _from_file(type, title, file, cat_col, col, common, *, horizontal, trend,
         return _result(path, type_name, common['style'], common['animate'])
 
     if type in ('bar', 'line'):
-        cats, cols = file_columns(file, cat_col, col)
+        cats, cols = file_columns(file, cat_col, col, sheet)
         _require(cols, 'file 至少需要 1 列数值')
         if len(cols) >= 2:  # 多数值列自动升级为多系列(与 CLI --file 一致)
             upgrade = 'bar-multi' if type == 'bar' else 'line-multi'
@@ -229,35 +235,35 @@ def _from_file(type, title, file, cat_col, col, common, *, horizontal, trend,
         if type == 'bar':
             return done(bar(title, cats, cols[0][1], horizontal=horizontal, **common), type)
         return done(line(title, cats, cols[0][1], name=cols[0][0], **common), type)
-    if type in ('area', 'pie', 'donut', 'waterfall', 'funnel'):
-        cats, cols = file_columns(file, cat_col, col)
+    if type in ('area', 'pie', 'donut', 'rose', 'waterfall', 'funnel'):
+        cats, cols = file_columns(file, cat_col, col, sheet)
         _require(len(cols) == 1,
                  f'{type} 只支持 1 列数值,file 里有 {len(cols)} 列(可用 col 挑 1 列)')
         if type == 'waterfall':
             return done(waterfall(title, cats, cols[0][1], total=total, **common), type)
         return done(_CHART_FNS[type](title, cats, cols[0][1], **common), type)
     if type == 'combo':
-        cats, cols = file_columns(file, cat_col, col)
+        cats, cols = file_columns(file, cat_col, col, sheet)
         _require(len(cols) == 2,
                  f'combo 的 file 需要 2 列数值(第 1 列柱值、第 2 列折线值),'
                  f'收到 {len(cols)} 列')
         return done(combo(title, cats, cols[0][1], cols[1][1], **common), type)
     if type in _SERIES_TYPES:  # line-multi / bar-multi / radar:各数值列 = 一个系列
-        cats, cols = file_columns(file, cat_col, col)
+        cats, cols = file_columns(file, cat_col, col, sheet)
         _require(cols, 'file 至少需要 1 列数值')
         return done(_CHART_FNS[type](title, cats, cols, **common), type)
     if type == 'box':
-        return done(box(title, file_box_groups(file), **common), type)
+        return done(box(title, file_box_groups(file, sheet), **common), type)
     if type == 'hist':
-        return done(hist(title, file_samples(file), bins=bins, **common), type)
+        return done(hist(title, file_samples(file, sheet), bins=bins, **common), type)
     if type in _XY_TYPES:
-        xs, ys, sizes, labels = file_xy(file, sizes=type == 'bubble')
+        xs, ys, sizes, labels = file_xy(file, sizes=type == 'bubble', sheet=sheet)
         if type == 'bubble':
             _require(sizes, 'bubble 的 file 需要第 3 列气泡大小')
             return done(bubble(title, xs, ys, sizes, labels=labels, **common), type)
         return done(scatter(title, xs, ys, trend=trend, labels=labels, **common), type)
     if type == 'heatmap':
-        rlabels, col_names, matrix = file_matrix(file, cat_col)
+        rlabels, col_names, matrix = file_matrix(file, cat_col, sheet)
         return done(heatmap(title, rlabels, col_names, matrix, **common), type)
     raise ToolError(f'未知图表类型 {type!r},可选:{", ".join(_CHART_FNS)}')
 
@@ -275,14 +281,20 @@ def _result(path, chart_type: str, style: str, animated: bool) -> str:
         'List the 13 available chart styles grouped in 4 packs (academic / business '
         '/ minimal-presentation / others). Returns one line per theme: '
         'key (use it as the "style" param of make_chart), Chinese label, '
-        'and a one-line description. Default style is "business".'
+        'and a one-line description. Default style is "business". '
+        'preview=true additionally renders a montage image (every theme drawing '
+        'the same mini bar chart) for visual comparison and returns its path.'
     ),
 )
-def list_themes() -> str:
+def list_themes(preview: bool = False) -> str:
     lines = []
     for pack, members in THEME_PACKS.items():
         lines.append(f'[{pack}]')
         lines += [f'  {k} | {THEME_LABELS[k]} | {THEME_DESCS[k]}' for k in members]
+    if preview:
+        with contextlib.redirect_stdout(sys.stderr):
+            path = themes_preview()
+        lines.append(f'\n主题预览拼版图(每主题同一组迷你柱状图):{path}')
     return '\n'.join(lines)
 
 

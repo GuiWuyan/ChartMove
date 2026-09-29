@@ -1,6 +1,7 @@
-"""CLI 入口(M2):16 种图表类型,一条命令出图。
+"""CLI 入口(M2):17 种图表类型,一条命令出图。
 
     chartgen bar "季度产量" Q1=120 Q2=200 Q3=90 --style mckinsey
+    chartgen rose "品类占比" 手机=320 电脑=210 平板=150    # 玫瑰图(极坐标柱状)
     chartgen line "月度增长" --data data.json        # {"categories": [...], "values": [...]}
     chartgen line-multi "对比" --categories 1月,2月,3月 --series series.json
     chartgen combo "销量与客单价" Q1=120 Q2=200 --line 86,92
@@ -10,6 +11,7 @@
     chartgen heatmap "热力" --data heat.json
     #   heat.json: {"rows": [...], "cols": [...], "values": [[...], ...]}
     chartgen themes                                  # 列出全部主题(按风格包)
+    chartgen themes --preview                        # 列主题并生成预览拼版图
 
 数据约定:单系列用"类目=值"内联;--data / --series 接内联 JSON 字符串或文件路径。
 """
@@ -36,7 +38,9 @@ from .core import (
     line_multi,
     pie,
     radar,
+    rose,
     scatter,
+    themes_preview,
     waterfall,
 )
 from .table import file_box_groups, file_columns, file_matrix, file_samples, file_xy
@@ -138,7 +142,7 @@ def _file_cols(args, min_cols=1):
     """--file 数据:--cat-col 指定类目列(默认第 1 列),其余列为数值;
     --col 可挑选 1 个数值列(表头名或序号)。返回 (类目, [(列名, 数值列表)])。"""
     cats, cols = file_columns(args.file, getattr(args, 'cat_col', None),
-                              getattr(args, 'col', None))
+                              getattr(args, 'col', None), getattr(args, 'sheet', None))
     if len(cols) < min_cols:
         raise ValueError(f'--file 至少需要 {min_cols} 列数值')
     return cats, cols
@@ -216,7 +220,7 @@ def _run_multi(fn, args):
 def _run_box(fn, args):
     kw = _common_kwargs(args)
     if args.file:  # 每列一组,首行表头=组名,单元格为原始样本
-        return fn(args.title, file_box_groups(args.file), **kw)
+        return fn(args.title, file_box_groups(args.file, getattr(args, 'sheet', None)), **kw)
     if not args.series:
         raise ValueError('box 需要 --series(JSON)或 --file(CSV/Excel,每列一组)')
     return fn(args.title, _norm_series(_load_json(args.series)), **kw)
@@ -225,7 +229,8 @@ def _run_box(fn, args):
 def _run_xy(fn, args):
     kw = _common_kwargs(args)
     if args.file:  # 列顺序:x, y(, sizes)(, labels)
-        xs, ys, sizes, labels = file_xy(args.file, sizes=args.type == 'bubble')
+        xs, ys, sizes, labels = file_xy(args.file, sizes=args.type == 'bubble',
+                                        sheet=getattr(args, 'sheet', None))
         if args.type == 'bubble':
             if not sizes:
                 raise ValueError('bubble 的 --file 需要第 3 列气泡大小')
@@ -249,7 +254,8 @@ def _run_hist(fn, args):
     bins = args.bins if args.bins == 'auto' else int(args.bins)
     kw = _common_kwargs(args)
     if args.file:
-        return fn(args.title, file_samples(args.file), bins=bins, **kw)
+        return fn(args.title, file_samples(args.file, getattr(args, 'sheet', None)),
+                  bins=bins, **kw)
     if args.data:
         vals = [float(v) for v in _load_json(args.data)['values']]
     elif getattr(args, 'items', None):
@@ -262,7 +268,8 @@ def _run_hist(fn, args):
 def _run_heatmap(fn, args):
     kw = _common_kwargs(args)
     if args.file:  # 类目列=行名(默认第 1 列),其余列为矩阵
-        rlabels, col_names, matrix = file_matrix(args.file, getattr(args, 'cat_col', None))
+        rlabels, col_names, matrix = file_matrix(args.file, getattr(args, 'cat_col', None),
+                                                 getattr(args, 'sheet', None))
         return fn(args.title, rlabels, col_names, matrix,
                   annotate=not args.no_annotate, **kw)
     d = _load_json(args.data) if args.data else {}
@@ -298,12 +305,15 @@ _RUNNERS = {
 }
 
 
-def _themes_cmd(_args) -> int:
+def _themes_cmd(args) -> int:
     for pack, members in THEME_PACKS.items():
         print(f'{pack}:')
         for key in members:
             print(f'  {key:<11} {THEME_LABELS[key]} —— {THEME_DESCS[key]}')
     print('\n用法:--style <主题名>(默认 business)')
+    if getattr(args, 'preview', False):
+        themes_preview(out=getattr(args, 'out', None),
+                       out_dir=getattr(args, 'out_dir', None))
     return 0
 
 
@@ -335,6 +345,7 @@ def _build_parser() -> argparse.ArgumentParser:
                                        '第 1 列类目,其余列数值,多数值列 bar/line 自动转多系列)')
     common.add_argument('--cat-col', help='--file 的类目列(表头名或从 1 数的序号,默认第 1 列)')
     common.add_argument('--col', help='--file 挑选 1 个数值列(表头名或序号;默认除类目列外全部)')
+    common.add_argument('--sheet', help='--file 的 Excel 工作表(名称或从 1 数的序号,默认第一个)')
 
     sps = {}
     for name, fn, text, items_help in (
@@ -343,6 +354,7 @@ def _build_parser() -> argparse.ArgumentParser:
         ('area', area, '面积图', '数据 类目=数值(或 --data JSON)'),
         ('pie', pie, '饼图', '数据 类目=数值(或 --data JSON)'),
         ('donut', donut, '环形图', '数据 类目=数值(或 --data JSON)'),
+        ('rose', rose, '玫瑰图(极坐标柱状)', '数据 类目=数值(或 --data JSON)'),
         ('waterfall', waterfall, '瀑布图(自动补合计柱)', '数据 类目=增减值,如 1月=20'),
         ('funnel', funnel, '漏斗图(自动标逐级转化率)', '数据 类目=数值'),
         ('combo', combo, '双轴组合图', '柱值 类目=数值(折线值用 --line)'),
@@ -389,6 +401,10 @@ def _build_parser() -> argparse.ArgumentParser:
     sps['heatmap'].add_argument('--no-annotate', action='store_true', help='不在格子标数值')
 
     themes_sp = sub.add_parser('themes', help='列出全部主题(按风格包)')
+    themes_sp.add_argument('--preview', action='store_true',
+                           help='同时生成主题预览拼版图(全部主题 × 同一组迷你柱状图)')
+    themes_sp.add_argument('--out-dir', help='预览图输出目录(默认 CHARTGEN_OUT_DIR 或 ./Results/)')
+    themes_sp.add_argument('--out', help='预览图文件名(不含扩展名,默认 themes_预览)')
     themes_sp.set_defaults(func=_themes_cmd)
     return ap
 

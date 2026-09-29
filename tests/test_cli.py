@@ -36,6 +36,7 @@ def _expect_file(tmp_path, filename: str) -> None:
     ('area', ('area', 't', *PAIRS)),
     ('pie', ('pie', 't', *PAIRS)),
     ('donut', ('donut', 't', *PAIRS)),
+    ('rose', ('rose', 't', *PAIRS)),
     ('waterfall', ('waterfall', 't', 'a=10', 'b=-4', 'c=6')),
     ('funnel', ('funnel', 't', *PAIRS)),
     ('combo', ('combo', 't', *PAIRS, '--line', '5,8,6')),
@@ -57,7 +58,7 @@ def _expect_file(tmp_path, filename: str) -> None:
                              'values': [[1, 2], [3, 4]]}))),
 ])
 def test_cli_all_types(name, argv, tmp_path):
-    """验收主体:16 种类型各一条命令出图。"""
+    """验收主体:17 种类型各一条命令出图。"""
     _run(tmp_path, *argv)
     _expect_png(tmp_path, name.replace('-', '_'))
 
@@ -73,6 +74,11 @@ def test_themes_subcommand(tmp_path, capsys):
     assert cli.main(['themes']) == 0
     out = capsys.readouterr().out
     assert '学术包' in out and 'business' in out and '麦肯锡风' in out
+
+
+def test_themes_preview(tmp_path):
+    _run(tmp_path, 'themes', '--preview')
+    _expect_file(tmp_path, 'themes_预览.png')
 
 
 def test_bad_pairs_exit_1(tmp_path, capsys):
@@ -170,6 +176,24 @@ def test_file_xlsx_bar(tmp_path):
     wb.save(p)
     _run(tmp_path, 'bar', '季度销量', '--file', str(p))
     _expect_file(tmp_path, 'bar_季度销量.png')
+
+
+def test_file_xlsx_sheet(tmp_path):
+    """--sheet 按名称或从 1 数的序号选 Excel 工作表。"""
+    op = pytest.importorskip('openpyxl')
+    p = tmp_path / 'multi.xlsx'
+    wb = op.Workbook()
+    wb.active.append(['类目', '2023销量'])
+    wb.active.append(['Q1', 100])
+    ws2 = wb.create_sheet('2024')
+    ws2.append(['类目', '销量'])
+    ws2.append(['Q1', 888])
+    ws2.append(['Q2', 666])
+    wb.save(p)
+    _run(tmp_path, 'bar', '按名称', '--file', str(p), '--sheet', '2024')
+    _expect_file(tmp_path, 'bar_按名称.png')
+    _run(tmp_path, 'rose', '按序号', '--file', str(p), '--sheet', '2')
+    _expect_file(tmp_path, 'rose_按序号.png')
 
 
 def test_file_csv_heatmap(tmp_path):

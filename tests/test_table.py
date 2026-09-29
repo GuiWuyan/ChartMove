@@ -51,6 +51,28 @@ def test_excel_xlsx(tmp_path):
     assert rows == [['一月', '120'], ['二月', '200']]
 
 
+def test_excel_sheet(tmp_path):
+    """sheet 按工作表名或从 1 数的序号选择;缺省读第一个;CSV 误用报中文错。"""
+    op = pytest.importorskip('openpyxl')
+    p = tmp_path / 's.xlsx'
+    wb = op.Workbook()
+    wb.active.append(['类目', '销量'])
+    wb.active.append(['一月', 120])
+    ws2 = wb.create_sheet('2024')
+    ws2.append(['类目', '销量'])
+    ws2.append(['三月', 300])
+    wb.save(p)
+    assert read_table(p)[1] == [['一月', '120']]
+    assert read_table(p, sheet='2024')[1] == [['三月', '300']]
+    assert read_table(p, sheet='2')[1] == [['三月', '300']]
+    with pytest.raises(ValueError, match='找不到工作表'):
+        read_table(p, sheet='不存在')
+    with pytest.raises(ValueError, match='超出范围'):
+        read_table(p, sheet='9')
+    with pytest.raises(ValueError, match='CSV 没有工作表概念'):
+        read_table(_write(tmp_path, 't.csv', 'a,b\n1,2\n'), sheet='2024')
+
+
 def test_unsupported_suffix(tmp_path):
     with pytest.raises(ValueError, match='不支持的表格格式'):
         read_table(tmp_path / 't.xls')
