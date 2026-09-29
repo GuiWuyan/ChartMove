@@ -1,4 +1,4 @@
-"""冒烟测试:9 种图表类型 × PNG / GIF / MP4 全过(验收标准,docs/plan.md M1)。
+"""冒烟测试:16 种图表类型 × PNG / GIF / MP4 全过。
 
 另覆盖:pdf / tif 静态格式、8 主题、横向条形、figsize / dpi 参数、
 中文缺字检测与校验错误。产物写入 pytest 临时目录,断言后即删。
@@ -113,7 +113,7 @@ def _assert_ok(path: Path, ext: str, warns: list[str]) -> None:
 @pytest.mark.parametrize('fmt', ['png', 'gif', 'mp4'])
 @pytest.mark.parametrize('name', list(CASES))
 def test_matrix(name, fmt, tmp_path):
-    """验收主体:9 种类型 × 3 种输出。"""
+    """验收主体:16 种类型 × 3 种输出。"""
     if fmt == 'mp4' and not HAS_FFMPEG:
         pytest.skip('未安装 ffmpeg,跳过 MP4')
     fn, kw = CASES[name]
@@ -153,7 +153,7 @@ def test_gif_loop_infinite(tmp_path):
     _assert_ok(path, 'gif', warns)
 
 
-def test_gif_total_duration_constant(tmp_path):
+def test_gif_total_duration_constant(tmp_path, full_animation):
     """Pillow 丢弃相同帧时会把时长累加到保留帧:任何图表 GIF 总时长恒为 48 帧 × 50ms,
     分步生长的图(热力图等)帧数少但节奏不变。"""
     path, _ = _render(heatmap, dict(rows=['r1', 'r2'], cols=['c1', 'c2'],
