@@ -1,14 +1,14 @@
-"""一条命令生成全部 17 种示例图,兼任用法文档(默认写入项目 ./Results/)。
+"""一条命令生成全部 20 种示例图,兼任用法文档(默认写入项目 ./Results/)。
 
-    python examples/make_all.py                # 17 张 PNG,主题按序轮换
-    python examples/make_all.py --animate      # 17 张 GIF(数据生长动画)
+    python examples/make_all.py                # 20 张 PNG,主题按序轮换
+    python examples/make_all.py --animate      # 20 张 GIF(数据生长动画)
     python examples/make_all.py --out-dir D:/tmp/charts
 """
 from __future__ import annotations
 
 import argparse
 
-from chartgen import (
+from vizkit import (
     THEMES,
     area,
     bar,
@@ -17,7 +17,9 @@ from chartgen import (
     bubble,
     combo,
     donut,
+    dumbbell,
     funnel,
+    gantt,
     heatmap,
     hist,
     line,
@@ -26,6 +28,7 @@ from chartgen import (
     radar,
     rose,
     scatter,
+    treemap,
     waterfall,
 )
 
@@ -39,7 +42,7 @@ MATRIX = [[3, 7, 2, 5], [8, 1, 6, 4], [2, 5, 9, 3], [6, 2, 4, 8]]
 
 
 def make_all(out_dir=None, animate=False) -> list:
-    """依次生成 17 种类型,主题按序轮换,顺带展示 13 套风格。"""
+    """依次生成 20 种类型,主题按序轮换,顺带展示 13 套风格。"""
     styles = list(THEMES)
 
     def at(i):
@@ -82,12 +85,20 @@ def make_all(out_dir=None, animate=False) -> list:
                style=at(15), animate=animate, out_dir=out_dir),
         rose('品类销量玫瑰图', ['手机', '电脑', '平板', '配件'], [320, 210, 150, 90],
              style=at(16), animate=animate, out_dir=out_dir),
+        treemap('预算构成', ['研发', '市场', '运营', '行政', '培训'],
+                [420, 300, 180, 100, 60], style=at(17), animate=animate,
+                out_dir=out_dir),
+        gantt('项目排期', ['需求', '开发', '测试', '上线'], [1, 4, 12, 18],
+              [5, 11, 17, 19], style=at(18), animate=animate, out_dir=out_dir),
+        dumbbell('渠道转化率对比', ['官网', '门店', 'App', '小程序'],
+                 [('2024', [3.2, 5.1, 8.4, 6.0]), ('2025', [4.1, 4.8, 11.2, 9.3])],
+                 style=at(19), animate=animate, out_dir=out_dir),
     ]
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description='生成全部 17 种示例图(默认写 ./Results/)')
-    ap.add_argument('--out-dir', default=None, help='输出目录(默认 CHARTGEN_OUT_DIR 或 ./Results)')
+    ap = argparse.ArgumentParser(description='生成全部 20 种示例图(默认写 ./Results/)')
+    ap.add_argument('--out-dir', default=None, help='输出目录(默认 VIZKIT_OUT_DIR 或 ./Results)')
     ap.add_argument('--animate', action='store_true', help='出 GIF 动画(默认 PNG)')
     args = ap.parse_args()
     paths = make_all(args.out_dir, args.animate)

@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from chartgen import cli
+from vizkit import cli
 
 PAIRS = ['a=10', 'b=20', 'c=15']
 
@@ -37,6 +37,7 @@ def _expect_file(tmp_path, filename: str) -> None:
     ('pie', ('pie', 't', *PAIRS)),
     ('donut', ('donut', 't', *PAIRS)),
     ('rose', ('rose', 't', *PAIRS)),
+    ('treemap', ('treemap', 't', *PAIRS)),
     ('waterfall', ('waterfall', 't', 'a=10', 'b=-4', 'c=6')),
     ('funnel', ('funnel', 't', *PAIRS)),
     ('combo', ('combo', 't', *PAIRS, '--line', '5,8,6')),
@@ -56,9 +57,13 @@ def _expect_file(tmp_path, filename: str) -> None:
     ('heatmap', ('heatmap', 't', '--data',
                  json.dumps({'rows': ['r1', 'r2'], 'cols': ['c1', 'c2'],
                              'values': [[1, 2], [3, 4]]}))),
+    ('gantt', ('gantt', 't', '--categories', 'a,b,c', '--starts', '1,3,5',
+               '--ends', '4,6,9')),
+    ('dumbbell', ('dumbbell', 't', '--categories', 'a,b,c', '--series',
+                  json.dumps([['2024', [1, 2, 3]], ['2025', [2, 3, 4]]]))),
 ])
 def test_cli_all_types(name, argv, tmp_path):
-    """验收主体:17 种类型各一条命令出图。"""
+    """验收主体:20 种类型各一条命令出图。"""
     _run(tmp_path, *argv)
     _expect_png(tmp_path, name.replace('-', '_'))
 
@@ -68,6 +73,48 @@ def test_bar_horizontal_flag(tmp_path):
     f = tmp_path / 'bar_Top_城市.png'
     assert f.exists() and f.stat().st_size > 0
     f.unlink()
+
+
+def test_line_band_flag(tmp_path):
+    _run(tmp_path, 'line', '预测', '1月=120', '2月=135', '3月=128',
+         '--lower', '112,125,116', '--upper', '128,145,140')
+    _expect_file(tmp_path, 'line_预测.png')
+
+
+def test_line_band_args_reach_core(tmp_path, monkeypatch):
+    """回归:--lower/--upper 必须透传给 core.line(曾止步 argparse,区间带静默丢失)。"""
+    got = {}
+    real = cli.line
+
+    def spy(title, cats, vals, **kw):
+        got.update(kw)
+        return real(title, cats, vals, **kw)
+
+    monkeypatch.setattr(cli, 'line', spy)
+    assert cli.main(['line', '预测', '1月=120', '2月=135', '3月=128',
+                     '--lower', '112,125,116', '--upper', '128,145,140',
+                     '--out-dir', str(tmp_path)]) == 0
+    assert got['lower'] == [112.0, 125.0, 116.0]
+    assert got['upper'] == [128.0, 145.0, 140.0]
+    (tmp_path / 'line_预测.png').unlink()
+
+
+def test_line_band_rejected_for_multi_series_file(tmp_path):
+    """--file 多数值列升级多系列折线时不接受区间带(报中文错,不是 TypeError)。"""
+    f = _csv(tmp_path, 'm.csv', '月份,实际,预测\n1月,120,112\n2月,135,125\n')
+    assert cli.main(['line', 't', '--file', str(f),
+                     '--lower', '1,2', '--upper', '3,4',
+                     '--out-dir', str(tmp_path)]) == 1
+
+
+def test_gantt_dumbbell_file(tmp_path):
+    """--file 的 2 个数值列:甘特图 = 开始/结束,哑铃图 = 期初/期末。"""
+    g = _csv(tmp_path, 'g.csv', '任务,开始,结束\n需求,1,5\n开发,4,11\n')
+    _run(tmp_path, 'gantt', '排期', '--file', str(g))
+    _expect_file(tmp_path, 'gantt_排期.png')
+    d = _csv(tmp_path, 'd.csv', '渠道,2024,2025\n官网,3.2,4.1\n门店,5.1,4.8\n')
+    _run(tmp_path, 'dumbbell', '对比', '--file', str(d), '--slope')
+    _expect_file(tmp_path, 'dumbbell_对比.png')
 
 
 def test_themes_subcommand(tmp_path, capsys):

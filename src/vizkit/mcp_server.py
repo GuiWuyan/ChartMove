@@ -1,4 +1,4 @@
-"""MCP Server 入口:把 chartgen 暴露给 AI / agent,stdio 传输。
+"""MCP Server 入口:把 vizkit 暴露给 AI / agent,stdio 传输。
 工具面收敛为 2 个(docs/plan.md 5.3):
     make_chart   生成图表,返回 JSON {path(绝对路径), file_size, type, style, animated}
     list_themes  列出 13 主题 × 4 风格包(名称 + 一句话描述)
@@ -25,7 +25,9 @@ from .core import (
     bubble,
     combo,
     donut,
+    dumbbell,
     funnel,
+    gantt,
     heatmap,
     hist,
     line,
@@ -35,6 +37,7 @@ from .core import (
     rose,
     scatter,
     themes_preview,
+    treemap,
     waterfall,
 )
 from .table import file_box_groups, file_columns, file_matrix, file_samples, file_xy
@@ -43,7 +46,7 @@ from .themes import THEME_DESCS, THEME_LABELS, THEME_PACKS
 ChartType = Literal[
     'bar', 'line', 'line-multi', 'area', 'pie', 'donut', 'combo', 'bar-multi',
     'radar', 'scatter', 'bubble', 'hist', 'box', 'heatmap', 'waterfall', 'funnel',
-    'rose']
+    'rose', 'treemap', 'gantt', 'dumbbell']
 Fmt = Literal['png', 'pdf', 'tif', 'gif', 'mp4']
 
 _CHART_FNS = {
@@ -51,16 +54,18 @@ _CHART_FNS = {
     'donut': donut, 'combo': combo, 'bar-multi': bar_multi, 'radar': radar,
     'scatter': scatter, 'bubble': bubble, 'hist': hist, 'box': box,
     'heatmap': heatmap, 'waterfall': waterfall, 'funnel': funnel, 'rose': rose,
+    'treemap': treemap, 'gantt': gantt, 'dumbbell': dumbbell,
 }
-_PAIR_TYPES = ('bar', 'line', 'area', 'pie', 'donut', 'waterfall', 'funnel', 'rose')
+_PAIR_TYPES = ('bar', 'line', 'area', 'pie', 'donut', 'waterfall', 'funnel', 'rose',
+               'treemap')
 _SERIES_TYPES = ('line-multi', 'bar-multi', 'radar')
 _XY_TYPES = ('scatter', 'bubble')
 
 server = MCPServer(
-    name='chartgen',
+    name='vizkit',
     version=__version__,
     instructions=(
-        'Chinese chart generator: 17 chart types x 13 themes, no font configuration '
+        'Chinese chart generator: 20 chart types x 13 themes, no font configuration '
         'needed, output is a persistent file. Use list_themes to discover styles. '
         'Call make_chart with inline data or a CSV/Excel file path (file param); '
         'the returned "path" (absolute path to the image file) IS the deliverable - '
@@ -91,8 +96,14 @@ def _norm_series(series) -> list[tuple[str, list[float]]]:
         'Returns JSON string: {path (absolute path, THE deliverable), file_size, '
         'type, style, animated}. Data params by type - '
         'category charts (bar/line/line-multi/area/pie/donut/combo/bar-multi/radar/'
-        'rose/waterfall/funnel): categories + values, or series=[[name, [values]], ...] '
+        'rose/treemap/waterfall/funnel): categories + values, or '
+        'series=[[name, [values]], ...] '
         'for multi-series (combo also needs line_values); '
+        'gantt: categories (task names) + starts + ends (numeric units); '
+        'dumbbell: series with EXACTLY 2 entries (before/after), '
+        'slope=true switches to a slope chart; '
+        'line accepts lower + upper (same length as values) to draw a '
+        'semi-transparent prediction/confidence band; '
         'scatter/bubble: x + y (+sizes for bubble, +labels optional); '
         'hist: values = raw samples; box: series = [[group_name, [samples]], ...]; '
         'heatmap: rows + cols + matrix (2-D numeric). '
@@ -149,6 +160,11 @@ def make_chart(
     total: bool = True,
     bins: int | str = 10,
     sample: int | None = None,
+    lower: list[float] | None = None,
+    upper: list[float] | None = None,
+    starts: list[float] | None = None,
+    ends: list[float] | None = None,
+    slope: bool = False,
     numfmt: Literal['auto', 'plain', 'percent'] = 'auto',
     note: str | None = None,
     file: str | None = None,
@@ -160,13 +176,15 @@ def make_chart(
                                   out=out, out_dir=out_dir, numfmt=numfmt, note=note)
     if type in ('line', 'area', 'line-multi'):  # sample 仅折线类支持
         common['sample'] = sample
+    if type == 'line':  # 区间带仅单系列折线支持
+        common['lower'], common['upper'] = lower, upper
     try:
         # stdio 协议独占 stdout:内核里"图表已生成"等打印必须让道,否则污染 JSON-RPC 流
         with contextlib.redirect_stdout(sys.stderr):
             if file is not None:  # 文件数据优先于内联参数(与 CLI --file 一致)
                 return _from_file(type, title, file, cat_col, col, sheet, common,
                                   horizontal=horizontal, trend=trend, total=total,
-                                  bins=bins)
+                                  bins=bins, slope=slope)
             if type in _PAIR_TYPES:
                 _require(categories is not None and values is not None,
                          'categories 与 values 不能为空')
@@ -213,13 +231,27 @@ def make_chart(
                          'heatmap 需要 rows、cols 与 matrix')
                 return _result(heatmap(title, rows, cols, matrix, **common),
                                type, style, animate)
+            if type == 'gantt':
+                _require(categories is not None and starts is not None
+                         and ends is not None,
+                         'gantt 需要 categories(任务名)、starts 与 ends')
+                return _result(gantt(title, categories, starts, ends, **common),
+                               type, style, animate)
+            if type == 'dumbbell':
+                _require(categories is not None and series is not None,
+                         'dumbbell 需要 categories 与 series')
+                ss = _norm_series(series)
+                _require(len(ss) == 2,
+                         f'dumbbell 需要恰好 2 个系列(期初/期末),收到 {len(ss)} 个')
+                return _result(dumbbell(title, categories, ss, slope=slope, **common),
+                               type, style, animate)
             raise ToolError(f'未知图表类型 {type!r},可选:{", ".join(_CHART_FNS)}')
     except (ValueError, RuntimeError, OSError) as e:  # 中文校验消息 → ToolError
         raise ToolError(str(e)) from e
 
 
 def _from_file(type, title, file, cat_col, col, sheet, common, *, horizontal, trend,
-               total, bins) -> str:
+               total, bins, slope) -> str:
     """file 数据出图:列约定与 CLI --file 一致,数据转换复用 table.py。"""
 
     def done(path, type_name: str):
@@ -235,7 +267,7 @@ def _from_file(type, title, file, cat_col, col, sheet, common, *, horizontal, tr
         if type == 'bar':
             return done(bar(title, cats, cols[0][1], horizontal=horizontal, **common), type)
         return done(line(title, cats, cols[0][1], name=cols[0][0], **common), type)
-    if type in ('area', 'pie', 'donut', 'rose', 'waterfall', 'funnel'):
+    if type in ('area', 'pie', 'donut', 'rose', 'treemap', 'waterfall', 'funnel'):
         cats, cols = file_columns(file, cat_col, col, sheet)
         _require(len(cols) == 1,
                  f'{type} 只支持 1 列数值,file 里有 {len(cols)} 列(可用 col 挑 1 列)')
@@ -265,6 +297,18 @@ def _from_file(type, title, file, cat_col, col, sheet, common, *, horizontal, tr
     if type == 'heatmap':
         rlabels, col_names, matrix = file_matrix(file, cat_col, sheet)
         return done(heatmap(title, rlabels, col_names, matrix, **common), type)
+    if type == 'gantt':  # 2 个数值列 = 开始、结束
+        cats, cols = file_columns(file, cat_col, col, sheet)
+        _require(len(cols) == 2,
+                 f'gantt 的 file 需要 2 列数值(第 1 列开始、第 2 列结束),'
+                 f'收到 {len(cols)} 列')
+        return done(gantt(title, cats, cols[0][1], cols[1][1], **common), type)
+    if type == 'dumbbell':  # 2 个数值列 = 期初、期末
+        cats, cols = file_columns(file, cat_col, col, sheet)
+        _require(len(cols) == 2,
+                 f'dumbbell 的 file 需要 2 列数值(期初、期末),收到 {len(cols)} 列')
+        return done(dumbbell(title, cats, [cols[0], cols[1]], slope=slope, **common),
+                    type)
     raise ToolError(f'未知图表类型 {type!r},可选:{", ".join(_CHART_FNS)}')
 
 

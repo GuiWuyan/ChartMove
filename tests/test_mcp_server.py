@@ -15,7 +15,7 @@ from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
 PARAMS = StdioServerParameters(command=sys.executable,
-                               args=['-m', 'chartgen.mcp_server'])
+                               args=['-m', 'vizkit.mcp_server'])
 
 
 def _call(tool_args: dict, name: str = 'make_chart'):
@@ -43,7 +43,7 @@ def test_tools_listed():
     assert set(schema['properties']['type']['enum']) == {
         'bar', 'line', 'line-multi', 'area', 'pie', 'donut', 'combo', 'bar-multi',
         'radar', 'scatter', 'bubble', 'hist', 'box', 'heatmap', 'waterfall',
-        'funnel', 'rose'}
+        'funnel', 'rose', 'treemap', 'gantt', 'dumbbell'}
 
 
 def test_make_chart_bar_png(tmp_path):
@@ -205,6 +205,25 @@ def test_file_sheet_and_rose(tmp_path):
     data = json.loads(result.content[0].text)
     assert data['type'] == 'rose'
     assert Path(data['path']).stat().st_size > 0
+
+
+def test_make_chart_new_types(tmp_path):
+    """treemap 内联数据、dumbbell 两系列、dumbbell 系列数校验。"""
+    _, result = _call({'type': 'treemap', 'title': '构成',
+                       'categories': ['a', 'b', 'c'], 'values': [5, 3, 2],
+                       'out_dir': str(tmp_path)})
+    assert not result.is_error
+    assert json.loads(result.content[0].text)['type'] == 'treemap'
+
+    _, result = _call({'type': 'dumbbell', 'title': '对比', 'categories': ['a', 'b'],
+                       'series': [['2024', [1, 2]], ['2025', [3, 4]]],
+                       'out_dir': str(tmp_path)})
+    assert not result.is_error
+
+    _, result = _call({'type': 'dumbbell', 'title': '错', 'categories': ['a'],
+                       'series': [['s1', [1]]], 'out_dir': str(tmp_path)})
+    assert result.is_error
+    assert '恰好 2 个系列' in result.content[0].text
 
 
 def test_numfmt_and_note(tmp_path):

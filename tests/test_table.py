@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from chartgen.table import (
+from vizkit.table import (
     file_box_groups,
     file_columns,
     file_matrix,
