@@ -1,6 +1,7 @@
 """冒烟测试:20 种图表类型 × PNG / GIF / MP4 全过。
 
-另覆盖:pdf / tif 静态格式、8 主题、横向条形、figsize / dpi 参数、
+矩阵内 line 自带区间带、dumbbell 为坡度图(slope=True),动画分支一并覆盖。
+另覆盖:pdf / tif 静态格式、13 主题、横向条形、figsize / dpi 参数、
 中文缺字检测与校验错误。产物写入 pytest 临时目录,断言后即删。
 """
 from __future__ import annotations
@@ -73,7 +74,8 @@ MATRIX = [[3, 7, 2, 5], [8, 1, 6, 4], [2, 5, 9, 3], [6, 2, 4, 8]]
 SINGLE = dict(categories=CATS, values=VALS)
 CASES: dict[str, tuple] = {
     'bar': (bar, dict(SINGLE)),
-    'line': (line, dict(SINGLE)),
+    'line': (line, dict(SINGLE, lower=[100, 180, 70, 140],
+                        upper=[140, 220, 110, 180])),
     'area': (area, dict(SINGLE)),
     'pie': (pie, dict(SINGLE)),
     'donut': (donut, dict(SINGLE)),
@@ -97,7 +99,7 @@ CASES: dict[str, tuple] = {
     'rose': (rose, dict(SINGLE)),
     'treemap': (treemap, dict(SINGLE)),
     'gantt': (gantt, dict(tasks=CATS, starts=[1, 4, 8, 12], ends=[5, 9, 13, 15])),
-    'dumbbell': (dumbbell, dict(categories=CATS, series=SERIES)),
+    'dumbbell': (dumbbell, dict(categories=CATS, series=SERIES, slope=True)),
 }
 
 

@@ -50,8 +50,9 @@ def make_all(out_dir=None, animate=False) -> list:
 
     return [
         bar('季度产量', CATS, VALS, style=at(0), animate=animate, out_dir=out_dir),
-        line('月度增长', MONTHS, [95, 130, 112, 178], style=at(1),
-             animate=animate, out_dir=out_dir),
+        line('月度增长', MONTHS, [95, 130, 112, 178],
+             lower=[82, 115, 97, 160], upper=[108, 145, 127, 196],
+             style=at(1), animate=animate, out_dir=out_dir),
         area('访问量走势', MONTHS, [820, 932, 901, 1290], style=at(2),
              animate=animate, out_dir=out_dir),
         pie('品类占比', ['线上', '门店', '批发'], [55, 30, 15], style=at(3),
@@ -92,7 +93,7 @@ def make_all(out_dir=None, animate=False) -> list:
               [5, 11, 17, 19], style=at(18), animate=animate, out_dir=out_dir),
         dumbbell('渠道转化率对比', ['官网', '门店', 'App', '小程序'],
                  [('2024', [3.2, 5.1, 8.4, 6.0]), ('2025', [4.1, 4.8, 11.2, 9.3])],
-                 style=at(19), animate=animate, out_dir=out_dir),
+                 slope=True, style=at(19), animate=animate, out_dir=out_dir),
     ]
 
 
