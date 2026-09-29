@@ -3,9 +3,9 @@
 13 主题 × 4 风格包(学术 / 商务 / 简约演示 / 其他),定义与元数据见 themes.py;
 扩展新主题只需在 THEMES 加一组参数,绘图代码零改动。
 
-    from chartgen import bar, line, pie, donut, area, combo, line_multi, bar_multi, radar
+    from vizkit import bar, line, pie, donut, area, combo, line_multi, bar_multi, radar
     bar('季度产量', ['Q1', 'Q2', 'Q3'], [120, 200, 90], style='mckinsey', animate=True)
-    # -> .../ChartGen/bar_季度产量.gif
+    # -> .../VizKit/bar_季度产量.gif
 
 约定:animate=True 出 GIF(默认)/ MP4,静态图 fmt='png'(默认)/'pdf'/'tif';
 GIF 默认播一遍停在末帧,loop=True 无限循环(MP4 是否循环由播放器决定);
@@ -28,14 +28,14 @@ import numpy as np
 matplotlib.use('Agg')  # 无窗口渲染,必须在 pyplot 之前
 from matplotlib import animation, patheffects
 from matplotlib import pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.colors import LinearSegmentedColormap, to_rgb
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch, Rectangle
 from matplotlib.ticker import FuncFormatter
 
 from .fonts import setup_fonts, sketch_font_chain
 from .output import next_path, resolve_out_dir, safe_stem
-from .themes import THEMES
+from .themes import THEME_LABELS, THEMES
 
 setup_fonts()
 
@@ -185,6 +185,16 @@ def _note(fig, th: dict) -> None:
                  alpha=0.55, ha='left', va='bottom')
 
 
+def _sketch_rc_extra(th: dict, fig_face: str) -> dict:
+    """手绘风格的 rc 覆盖:路径抖动 + 西文手写体;非 sketch 主题返回空 dict。"""
+    if not th.get('sketch'):
+        return {}
+    # 逐字回退必须把字体族列表直接给 font.family;泛型 sans-serif 只取首个命中
+    return {'path.sketch': (1, 100, 2),
+            'font.family': sketch_font_chain(),
+            'path.effects': [patheffects.withStroke(linewidth=3, foreground=fig_face)]}
+
+
 def _lttb_indices(ys, target: int) -> list[int]:
     """LTTB(Largest-Triangle-Three-Buckets)降采样:保留首尾,其余各桶取与前后
     参照点构成三角形面积最大的点,保形地抽到 ~target 个点(尖峰不丢)。"""
@@ -250,7 +260,9 @@ def _bar_draw(title, cats, vals, th, horizontal=False):
     return draw
 
 
-def _line_draw(title, cats, vals, th, fill=False, name='数值'):
+def _line_draw(title, cats, vals, th, fill=False, name='数值', band=None):
+    lo_band, hi_band = band if band is not None else (None, None)
+
     def draw(ax, p):
         _style(ax, title, th)
         n = len(vals)
@@ -260,6 +272,13 @@ def _line_draw(title, cats, vals, th, fill=False, name='数值'):
         if k + 1 < n:
             xr.append(k + frac)
             yr.append(vals[k] + frac * (vals[k + 1] - vals[k]))
+        if band is not None:  # 区间带跟随折线同步渐进展开
+            lr = list(lo_band[:k + 1])
+            hr = list(hi_band[:k + 1])
+            if k + 1 < n:
+                lr.append(lo_band[k] + frac * (lo_band[k + 1] - lo_band[k]))
+                hr.append(hi_band[k] + frac * (hi_band[k + 1] - hi_band[k]))
+            ax.fill_between(xr, lr, hr, color=th['palette'][0], alpha=0.18, linewidth=0)
         if fill:
             ax.fill_between(xr, yr, color=th['palette'][0], alpha=0.30)
         ax.plot(xr, yr, color=th['palette'][0], linewidth=4, marker='o', markersize=16,
@@ -270,7 +289,7 @@ def _line_draw(title, cats, vals, th, fill=False, name='数值'):
                 if pos >= idx:
                     ax.scatter([idx], [vals[idx]], s=HIGHLIGHT_SIZE, color=c,
                                zorder=6, edgecolors=th['face'], linewidths=1.5)
-        _ylim(ax, vals, th)
+        _ylim(ax, vals if band is None else vals + list(lo_band) + list(hi_band), th)
         _vfmt(ax, vals, th)
         rotated = _xticks(ax, cats, th)
         _xlim(ax, 0, n - 1)  # 折线逐点延伸,x 轴必须从首帧钉在最终范围
@@ -376,6 +395,39 @@ def _radar_draw(title, cats, series, th):
         _legend_bottom(ax, [Line2D([0], [0], color=th['palette'][si % len(th['palette'])],
                                    lw=3, marker='o', markersize=8, label=nm)
                             for si, (nm, _) in enumerate(series)], th)
+        # 极坐标圆等比,顶部必须预留标题空间,否则标题被裁
+        ax.figure.subplots_adjust(top=0.80)
+    return draw
+
+
+def _rose_draw(title, cats, vals, th):
+    """玫瑰图(Nightingale):极坐标柱状,半径即数值;第一扇区朝正上、顺时针。"""
+    n = len(vals)
+    thetas = [2 * math.pi * i / n for i in range(n)]
+    width = 2 * math.pi / n * 0.86  # 扇区间留缝
+
+    def draw(ax, p):
+        ax.set_facecolor(th['face'])  # 深色主题下避免露出白色圆形面板
+        ax.set_theta_offset(math.pi / 2)
+        ax.set_theta_direction(-1)
+        hs = [v * _stagger(p, i, n) for i, v in enumerate(vals)]
+        cols = [th['palette'][0]] * n
+        if _has_spread(vals):
+            cols[vals.index(max(vals))] = th['hi_max']
+            cols[vals.index(min(vals))] = th['hi_min']
+        ax.bar(thetas, hs, width=width, color=cols, edgecolor=th['face'], linewidth=1.5)
+        for i, t in enumerate(thetas):
+            if vals[i] > 0 and _stagger(p, i, n) > 0.5:
+                ax.text(t, hs[i] + max(vals) * 0.05, _nf(vals[i], th),
+                        ha='center', va='bottom', fontsize=12, color=th['text'])
+        ax.set_xticks(thetas)
+        ax.set_xticklabels(cats, fontsize=13, color=th['text'])
+        ax.tick_params(axis='x', pad=14)
+        ax.set_ylim(0, max(max(vals) * 1.18, 1))
+        ax.set_yticks([])  # 数值已逐扇区标注,半径刻度是噪声
+        ax.grid(color=th['grid_color'], linestyle=th['grid_ls'], linewidth=th['grid_lw'])
+        ax.spines['polar'].set_visible(False)
+        ax.set_title(title, fontsize=20, pad=24, color=th['text'])
         # 极坐标圆等比,顶部必须预留标题空间,否则标题被裁
         ax.figure.subplots_adjust(top=0.80)
     return draw
@@ -568,7 +620,7 @@ def _box_draw(title, series, th):
 
 def _heatmap_draw(title, rows, cols, arr, th, annotate=True):
     cmap = LinearSegmentedColormap.from_list(
-        'chartgen_seq', [th['face'], th['palette'][0], th['hi_max']])
+        'vizkit_seq', [th['face'], th['palette'][0], th['hi_max']])
     vmin, vmax = float(arr.min()), float(arr.max())
     if vmax <= vmin:
         vmax = vmin + 1.0
@@ -684,6 +736,167 @@ def _funnel_draw(title, cats, vals, th):
     return draw
 
 
+def _squarify(sizes, x, y, w, h):
+    """Squarified treemap 布局(Bruls et al. 2000):sizes 需降序且面积和 = w*h,
+    返回 [(x, y, w, h)];逐行贪心摆放,保持每格长宽比尽量接近 1。"""
+    if not sizes:
+        return []
+    if len(sizes) == 1:
+        return [(x, y, w, h)]
+
+    def layout(row, rx, ry, rw, rh):
+        out, off = [], 0.0
+        if rw >= rh:  # 行铺在左侧竖条,行内纵向堆叠
+            strip = sum(row) / rh
+            for s in row:
+                out.append((rx, ry + off, strip, s / strip))
+                off += s / strip
+        else:
+            strip = sum(row) / rw
+            for s in row:
+                out.append((rx + off, ry, s / strip, strip))
+                off += s / strip
+        return out
+
+    def worst(row):
+        return max(max(dx / dy, dy / dx)
+                   for _, _, dx, dy in layout(row, 0, 0, w, h) if dx and dy)
+
+    i, best = 1, worst(sizes[:1])
+    while i < len(sizes):
+        wr = worst(sizes[:i + 1])
+        if wr < best:
+            best, i = wr, i + 1
+        else:
+            break
+    row, rest = sizes[:i], sizes[i:]
+    if w >= h:
+        strip = sum(row) / h
+        return layout(row, x, y, w, h) + _squarify(rest, x + strip, y, w - strip, h)
+    strip = sum(row) / w
+    return layout(row, x, y, w, h) + _squarify(rest, x, y + strip, w, h - strip)
+
+
+def _treemap_draw(title, cats, vals, th):
+    pairs = sorted([(c, v) for c, v in zip(cats, vals) if v > 0],
+                   key=lambda cv: cv[1], reverse=True)  # 降序才出好比例
+    total = sum(v for _, v in pairs) or 1.0
+    # 面积单位须与画布一致(w*h),否则布局塌缩成细条
+    rects = _squarify([v / total * 16.0 * 9.0 for _, v in pairs], 0.0, 0.0, 16.0, 9.0)
+
+    def draw(ax, p):
+        _style(ax, title, th)
+        ax.set_axis_off()  # 树图无坐标轴,仅保留标题
+        for i, ((cat, v), (rx, ry, rw, rh)) in enumerate(zip(pairs, rects)):
+            pr = _stagger(p, i, len(pairs))
+            if pr <= 0:
+                continue
+            cx, cy = rx + rw / 2, ry + rh / 2  # 逐格从自身中心浮现
+            color = th['palette'][i % len(th['palette'])]
+            ax.add_patch(Rectangle((cx - rw / 2 * pr, cy - rh / 2 * pr),
+                                   rw * pr, rh * pr, facecolor=color,
+                                   edgecolor=th['face'], linewidth=2))
+            if pr > 0.5 and rw > 1.2 and rh > 0.62:  # 格子够大才标文字
+                r, g, b = to_rgb(color)
+                tc = '#111111' if 0.299 * r + 0.587 * g + 0.114 * b > 0.6 else '#ffffff'
+                ax.text(cx, cy, f'{cat}\n{_nf(v, th)}', ha='center', va='center',
+                        fontsize=14, color=tc)
+        ax.set_xlim(0, 16.0)
+        ax.set_ylim(0, 9.0)
+    return draw
+
+
+def _gantt_draw(title, tasks, starts, ends, th):
+    n = len(tasks)
+    lo, hi = min(starts), max(ends)
+    span = (hi - lo) or 1.0
+    durs = [e - s for s, e in zip(starts, ends)]
+
+    def draw(ax, p):
+        _style(ax, title, th, grid_axis='x')
+        for i in range(n):
+            pr = _stagger(p, i, n)
+            if pr <= 0:
+                continue
+            col = th['palette'][0]
+            if _has_spread(durs):  # 语义默认值:工期最长高亮、最短弱化
+                col = (th['hi_max'] if i == durs.index(max(durs))
+                       else th['hi_min'] if i == durs.index(min(durs)) else col)
+            s, e = starts[i], starts[i] + durs[i] * pr  # 从起点向右生长
+            ax.barh(i, e - s, left=s, height=0.55, color=col)
+            if pr > 0.5:
+                ax.text(e + span * 0.012, i, f'{_nf(starts[i], th)}–{_nf(ends[i], th)}',
+                        va='center', ha='left', fontsize=12, color=th['text'])
+        ax.set_yticks(range(n))
+        ax.set_yticklabels(tasks)
+        ax.invert_yaxis()  # 首任务在顶
+        ax.set_xlim(lo - span * 0.02, hi + span * 0.14)  # 右侧留给起止标注
+        _vfmt(ax, [*starts, *ends], th, axis='x')
+    return draw
+
+
+def _dumbbell_draw(title, cats, name_a, va, name_b, vb, th, slope):
+    n = len(cats)
+
+    def draw(ax, p):
+        _style(ax, title, th, grid_axis=None if slope else 'x')
+        if slope:  # 坡度图:期初/期末两列,每类别一条斜线
+            for i in range(n):
+                pr = _stagger(p, i, n)
+                if pr <= 0:
+                    continue
+                col = th['palette'][i % len(th['palette'])]
+                ax.plot([0.0, pr], [va[i], va[i] + (vb[i] - va[i]) * pr],
+                        color=col, linewidth=3, marker='o', markersize=11,
+                        markeredgecolor=th['face'], markeredgewidth=1.2)
+                if pr > 0.5:
+                    ax.text(-0.03, va[i], _nf(va[i], th), ha='right', va='center',
+                            fontsize=12, color=th['text'], zorder=7)
+                    ax.text(1.03, vb[i], f'{cats[i]} {_nf(vb[i], th)}', ha='left',
+                            va='center', fontsize=12, color=th['text'], zorder=7)
+            ax.set_xticks([0, 1])
+            ax.set_xticklabels([name_a, name_b])
+            ax.set_xlim(-0.32, 1.42)
+            _ylim(ax, list(va) + list(vb), th)
+            _vfmt(ax, list(va) + list(vb), th)
+        else:  # 哑铃图:横向,类别在 y 轴
+            all_vals = list(va) + list(vb)
+            lo, hi = min(all_vals), max(all_vals)
+            pad = (hi - lo) * 0.14 or 1.0
+            off = (hi - lo) * 0.02 or 0.3  # 标签离开圆点,避免被压住
+            for i in range(n):
+                pr = _stagger(p, i, n)
+                if pr <= 0:
+                    continue
+                mid = va[i] + (vb[i] - va[i]) * pr  # 连线从期初点长到期末点
+                ax.plot([va[i], mid], [i, i], color=th['axis'], linewidth=3)
+                ax.scatter([va[i]], [i], s=120, color=th['axis'], zorder=5,
+                           edgecolors=th['face'], linewidths=1.2)
+                ax.scatter([mid], [i], s=150, color=th['palette'][0], zorder=6,
+                           edgecolors=th['face'], linewidths=1.2)
+                if pr > 0.5:
+                    ax.text(va[i] - off if va[i] <= vb[i] else va[i] + off, i,
+                            _nf(va[i], th),
+                            ha='right' if va[i] <= vb[i] else 'left',
+                            va='center', fontsize=12, color=th['text'], zorder=7)
+                    ax.text(vb[i] + off if va[i] <= vb[i] else vb[i] - off, i,
+                            _nf(vb[i], th),
+                            ha='left' if va[i] <= vb[i] else 'right',
+                            va='center', fontsize=12, color=th['text'], zorder=7)
+            ax.set_yticks(range(n))
+            ax.set_yticklabels(cats)
+            ax.invert_yaxis()  # 首条目在顶
+            pad = (max(all_vals) - min(all_vals)) * 0.14 or 1.0
+            ax.set_xlim(min(all_vals) - pad, max(all_vals) + pad)
+            _vfmt(ax, all_vals, th, axis='x')
+            _legend_bottom(ax, [
+                Line2D([0], [0], linestyle='none', marker='o', markersize=12,
+                       markerfacecolor=th['axis'], label=name_a),
+                Line2D([0], [0], linestyle='none', marker='o', markersize=12,
+                       markerfacecolor=th['palette'][0], label=name_b)], th)
+    return draw
+
+
 # ---------- 渲染 ----------
 
 class _GifWriter(animation.PillowWriter):
@@ -710,12 +923,7 @@ def _render(kind, title, draw, *, animate, fmt, out, out_dir=None, loop=False,
     th = th or {}
     face = th.get('face', 'white')
     fig_face = th.get('fig_face') or face
-    rc_extra: dict = {}
-    if th.get('sketch'):  # 手绘风:路径抖动 + 西文手写体
-        # 逐字回退必须把字体族列表直接给 font.family;泛型 sans-serif 只取首个命中
-        rc_extra = {'path.sketch': (1, 100, 2),
-                    'font.family': sketch_font_chain(),
-                    'path.effects': [patheffects.withStroke(linewidth=3, foreground=fig_face)]}
+    rc_extra = _sketch_rc_extra(th, fig_face)  # 手绘风:路径抖动 + 西文手写体
 
     with plt.rc_context(rc_extra):
         out_path = resolve_out_dir(out_dir)
@@ -802,6 +1010,25 @@ def _validate_series(categories, series) -> list[tuple[str, list[float]]]:
     return out
 
 
+def _validate_band(vals, lower, upper) -> tuple[list[float], list[float]] | None:
+    """区间带校验:lower/upper 须同时给出、与 values 等长且 upper >= lower;未给返回 None。"""
+    if lower is None and upper is None:
+        return None
+    if lower is None or upper is None:
+        raise ValueError('区间带需要同时给出 lower 与 upper')
+    lo = [float(v) for v in lower]
+    hi = [float(v) for v in upper]
+    _check_finite(lo, 'lower')
+    _check_finite(hi, 'upper')
+    if not (len(lo) == len(hi) == len(vals)):
+        raise ValueError(f'区间带 lower/upper 需与 values 等长(需 {len(vals)} 个,'
+                         f'收到 lower {len(lo)} / upper {len(hi)} 个)')
+    bad = next((i for i, (a, b) in enumerate(zip(lo, hi)) if b < a), None)
+    if bad is not None:
+        raise ValueError(f'区间带 upper 需 >= lower(第 {bad + 1} 个点相反)')
+    return lo, hi
+
+
 def _validate_xy(xs, ys) -> tuple[list[float], list[float]]:
     x = [float(v) for v in xs]
     y = [float(v) for v in ys]
@@ -875,16 +1102,56 @@ def bar(title: str, categories, values, *, style='business', animate=False, fmt=
                    th=th, figsize=figsize, dpi=dpi)
 
 
+def rose(title: str, categories, values, *, style='business', animate=False, fmt=None,
+         loop=False, out: str | None = None, out_dir=None,
+         figsize=None, dpi=None, numfmt='auto',
+         note: str | None = None) -> Path:
+    """玫瑰图(Nightingale 极坐标柱状,values 需 >=0):半径即数值,构成/排名的圆形展示;
+    animate=True 逐扇区生长。"""
+    cats, vals = _validate(categories, values)
+    if min(vals) < 0:
+        raise ValueError('玫瑰图 values 需 >=0,含正负增减的数据请用 waterfall')
+    th = _theme(style, numfmt, note)
+    return _render('rose', title, _rose_draw(title, cats, vals, th),
+                   animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
+                   polar=True, th=th, figsize=figsize, dpi=dpi)
+
+
+def treemap(title: str, categories, values, *, style='business', animate=False, fmt=None,
+            loop=False, out: str | None = None, out_dir=None,
+            figsize=None, dpi=None, numfmt='auto',
+            note: str | None = None) -> Path:
+    """矩形树图(构成分析,values 需 >=0 且有正值):面积即占比,
+    内部按值降序 squarify 布局;animate=True 逐格从中心浮现。"""
+    cats, vals = _validate(categories, values)
+    if min(vals) < 0:
+        raise ValueError('矩形树图 values 需 >=0,含正负增减的数据请用 waterfall')
+    if max(vals) <= 0:
+        raise ValueError('矩形树图 values 需有正值(面积即占比)')
+    th = _theme(style, numfmt, note)
+    return _render('treemap', title, _treemap_draw(title, cats, vals, th),
+                   animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
+                   th=th, figsize=figsize, dpi=dpi)
+
+
 def line(title: str, categories, values, *, name='销售额', style='business',
          animate=False, fmt=None, loop=False, out: str | None = None, out_dir=None,
-         sample: int | None = None, figsize=None, dpi=None, numfmt='auto',
+         sample: int | None = None, lower=None, upper=None,
+         figsize=None, dpi=None, numfmt='auto',
          note: str | None = None) -> Path:
     """单系列折线:粗线大圆点,最大/最小高亮;animate=True 渐进绘制;
+    lower/upper 同时给出时画半透明区间带(预测/置信区间,随折线同步降采样);
     sample=N 对大数据做 LTTB 保形降采样(数千行 CSV 出图用)。"""
     cats, vals = _validate(categories, values)
+    band = _validate_band(vals, lower, upper)
     th = _theme(style, numfmt, note)
-    cats, (vals,) = _downsample(cats, sample, [list(vals)])
-    return _render('line', title, _line_draw(title, cats, vals, th, name=name),
+    if sample and sample < len(cats) and sample >= 3:  # 带与线用同一批 LTTB 保留点
+        idx = _lttb_indices(list(vals), sample)
+        cats = [cats[i] for i in idx]
+        vals = [vals[i] for i in idx]
+        if band is not None:
+            band = ([band[0][i] for i in idx], [band[1][i] for i in idx])
+    return _render('line', title, _line_draw(title, cats, vals, th, name=name, band=band),
                    animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)
 
@@ -1084,3 +1351,63 @@ def funnel(title: str, categories, values, *, style='business', animate=False, f
     return _render('funnel', title, _funnel_draw(title, cats, vals, th),
                    animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)
+
+
+def gantt(title: str, tasks, starts, ends, *, style='business', animate=False, fmt=None,
+          loop=False, out: str | None = None, out_dir=None,
+          figsize=None, dpi=None, numfmt='auto',
+          note: str | None = None) -> Path:
+    """甘特图:tasks 为任务名,starts/ends 为数值(如天;日期轴暂不支持);
+    ends 需 >= starts;工期最长/最短自动高亮;animate=True 逐条从起点生长。"""
+    tsks, ss = _validate(tasks, starts)
+    _, es = _validate(tasks, ends)
+    if any(e < s for s, e in zip(ss, es)):
+        bad = next(i for i, (s, e) in enumerate(zip(ss, es)) if e < s)
+        raise ValueError(f'甘特图 ends 需 >= starts(任务「{tsks[bad]}」结束早于开始)')
+    th = _theme(style, numfmt, note)
+    return _render('gantt', title, _gantt_draw(title, tsks, ss, es, th),
+                   animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
+                   th=th, figsize=figsize, dpi=dpi)
+
+
+def dumbbell(title: str, categories, series, *, slope=False, style='business',
+             animate=False, fmt=None, loop=False, out: str | None = None, out_dir=None,
+             figsize=None, dpi=None, numfmt='auto',
+             note: str | None = None) -> Path:
+    """哑铃图(两期/两组对比):series 恰好 2 个 [(期初名, 值列表), (期末名, 值列表)];
+    slope=True 出坡度图(期初/期末两列斜线,右端标类别名);animate=True 逐行浮现。"""
+    cats = [str(c) for c in categories]
+    ss = _validate_series(cats, series)
+    if len(ss) != 2:
+        raise ValueError(f'哑铃图需要恰好 2 个系列(期初/期末),收到 {len(ss)} 个;'
+                         '坡度图同样只用两期数据')
+    (name_a, va), (name_b, vb) = ss
+    th = _theme(style, numfmt, note)
+    return _render('dumbbell', title,
+                   _dumbbell_draw(title, cats, name_a, va, name_b, vb, th, slope),
+                   animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
+                   th=th, figsize=figsize, dpi=dpi)
+
+
+def themes_preview(*, out: str | None = None, out_dir=None, dpi=None) -> Path:
+    """主题预览拼版图:全部主题各画一组相同数据的迷你柱状图,一张 PNG 对比选风格。"""
+    cats, vals = ['一季度', '二季度', '三季度', '四季度'], [120, 200, 90, 160]
+    names = list(THEMES)
+    cols, rows = 4, math.ceil(len(names) / 4)
+    fig = plt.figure(figsize=(cols * 4.2, rows * 2.9), facecolor='white')
+    for i, name in enumerate(names):
+        th = _theme(name)
+        ax = fig.add_subplot(rows, cols, i + 1, facecolor=th.get('fig_face') or th['face'])
+        with plt.rc_context(_sketch_rc_extra(th, 'white')):
+            _bar_draw(THEME_LABELS[name], cats, vals, th)(ax, 1.0)
+        # 格标题落在白色图底上,固定深灰(主题正文色在深色主题下是浅色,会看不清)
+        ax.set_title(f'{THEME_LABELS[name]} · {name}', fontsize=13, color='#333333', pad=8)
+    for j in range(len(names), rows * cols):
+        fig.add_subplot(rows, cols, j + 1).axis('off')
+    fig.subplots_adjust(left=0.04, right=0.985, top=0.93, bottom=0.04,
+                        hspace=0.62, wspace=0.22)
+    path = next_path(resolve_out_dir(out_dir) / f'{safe_stem("themes", "预览", out)}.png')
+    fig.savefig(path, dpi=dpi or DPI_PNG, facecolor='white')
+    plt.close(fig)
+    print(f'主题预览图已生成: {path}')
+    return path

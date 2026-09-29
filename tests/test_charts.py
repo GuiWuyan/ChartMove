@@ -1,6 +1,7 @@
-"""冒烟测试:16 种图表类型 × PNG / GIF / MP4 全过。
+"""冒烟测试:20 种图表类型 × PNG / GIF / MP4 全过。
 
-另覆盖:pdf / tif 静态格式、8 主题、横向条形、figsize / dpi 参数、
+矩阵内 line 自带区间带、dumbbell 为坡度图(slope=True),动画分支一并覆盖。
+另覆盖:pdf / tif 静态格式、13 主题、横向条形、figsize / dpi 参数、
 中文缺字检测与校验错误。产物写入 pytest 临时目录,断言后即删。
 """
 from __future__ import annotations
@@ -14,7 +15,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from chartgen import (
+from vizkit import (
     THEMES,
     area,
     bar,
@@ -23,18 +24,22 @@ from chartgen import (
     bubble,
     combo,
     donut,
+    dumbbell,
     fonts,
     funnel,
+    gantt,
     heatmap,
     hist,
     line,
     line_multi,
     pie,
     radar,
+    rose,
     scatter,
+    treemap,
     waterfall,
 )
-from chartgen.core import (
+from vizkit.core import (
     FRAMES,
     GIF_FPS,
     _bar_draw,
@@ -55,7 +60,7 @@ from chartgen.core import (
     _theme,
     _waterfall_draw,
 )
-from chartgen.themes import THEME_DESCS, THEME_LABELS, THEME_PACKS
+from vizkit.themes import THEME_DESCS, THEME_LABELS, THEME_PACKS
 
 HAS_FFMPEG = shutil.which('ffmpeg') is not None
 
@@ -69,7 +74,8 @@ MATRIX = [[3, 7, 2, 5], [8, 1, 6, 4], [2, 5, 9, 3], [6, 2, 4, 8]]
 SINGLE = dict(categories=CATS, values=VALS)
 CASES: dict[str, tuple] = {
     'bar': (bar, dict(SINGLE)),
-    'line': (line, dict(SINGLE)),
+    'line': (line, dict(SINGLE, lower=[100, 180, 70, 140],
+                        upper=[140, 220, 110, 180])),
     'area': (area, dict(SINGLE)),
     'pie': (pie, dict(SINGLE)),
     'donut': (donut, dict(SINGLE)),
@@ -90,6 +96,10 @@ CASES: dict[str, tuple] = {
     'waterfall': (waterfall, dict(categories=CATS, values=[120, -30, 50, -20])),
     'funnel': (funnel, dict(categories=['访问', '加购', '下单', '付款'],
                             values=[1000, 420, 180, 120])),
+    'rose': (rose, dict(SINGLE)),
+    'treemap': (treemap, dict(SINGLE)),
+    'gantt': (gantt, dict(tasks=CATS, starts=[1, 4, 8, 12], ends=[5, 9, 13, 15])),
+    'dumbbell': (dumbbell, dict(categories=CATS, series=SERIES, slope=True)),
 }
 
 
@@ -113,7 +123,7 @@ def _assert_ok(path: Path, ext: str, warns: list[str]) -> None:
 @pytest.mark.parametrize('fmt', ['png', 'gif', 'mp4'])
 @pytest.mark.parametrize('name', list(CASES))
 def test_matrix(name, fmt, tmp_path):
-    """验收主体:16 种类型 × 3 种输出。"""
+    """验收主体:20 种类型 × 3 种输出。"""
     if fmt == 'mp4' and not HAS_FFMPEG:
         pytest.skip('未安装 ffmpeg,跳过 MP4')
     fn, kw = CASES[name]
@@ -408,6 +418,66 @@ def test_negative_values_rejected():
         bar_multi('t', ['a', 'b'], [('销售额', [120, -30])])
     with pytest.raises(ValueError, match='combo'):
         combo('t', ['a', 'b'], [120, -30], [80, 140])
+    with pytest.raises(ValueError, match='玫瑰图'):
+        rose('t', ['a', 'b'], [120, -30])
+
+
+def test_band_validation():
+    """区间带校验契约:lower/upper 必须成对、与 values 等长且 upper >= lower。"""
+    with pytest.raises(ValueError, match='同时给出'):
+        line('t', ['a', 'b', 'c'], [1, 2, 3], lower=[0, 1, 2])
+    with pytest.raises(ValueError, match='等长'):
+        line('t', ['a', 'b', 'c'], [1, 2, 3], lower=[0, 1], upper=[2, 3, 4])
+    with pytest.raises(ValueError, match='upper 需 >= lower'):
+        line('t', ['a', 'b', 'c'], [1, 2, 3], lower=[2, 3, 4], upper=[0, 1, 2])
+
+
+def test_gantt_and_dumbbell_validation():
+    """甘特图起止校验;哑铃图恰好 2 个系列校验。"""
+    with pytest.raises(ValueError, match='甘特图'):
+        gantt('t', ['a', 'b'], [3, 1], [2, 4])
+    with pytest.raises(ValueError, match='恰好 2 个系列'):
+        dumbbell('t', ['a', 'b'], [('s1', [1, 2])])
+    with pytest.raises(ValueError, match='恰好 2 个系列'):
+        dumbbell('t', ['a', 'b'], [('s1', [1, 2]), ('s2', [3, 4]), ('s3', [5, 6])])
+
+
+def test_line_band_and_dumbbell_slope(tmp_path):
+    """区间带跟随折线渲染;哑铃图 slope=True 出坡度图。"""
+    path, warns = _render(line, dict(categories=CATS, values=VALS,
+                                     lower=[100, 180, 70, 140],
+                                     upper=[140, 220, 110, 180]), tmp_path)
+    _assert_ok(path, 'png', warns)
+    path, warns = _render(dumbbell, dict(categories=CATS, series=SERIES, slope=True),
+                          tmp_path)
+    _assert_ok(path, 'png', warns)
+
+
+def test_line_band_draws_polygon():
+    """区间带必须真正画出半透明多边形(回归:CLI 曾不透传 --lower/--upper 而静默丢失)。"""
+    from matplotlib.collections import PolyCollection
+    fig, ax = plt.subplots()
+    try:
+        _line_draw('t', CATS, VALS, _theme('business'),
+                   band=([100, 180, 70, 140], [140, 220, 110, 180]))(ax, 1.0)
+        assert [c for c in ax.collections if isinstance(c, PolyCollection)], '区间带未渲染'
+    finally:
+        plt.close(fig)
+
+
+def test_squarify_tiling():
+    """squarify 必须铺满画布且面积正比于值(回归:归一化错误会让全部格子塌缩成细条)。"""
+    from vizkit.core import _squarify
+    vals = [420, 300, 180, 100, 60]
+    sizes = [v / sum(vals) * 16.0 * 9.0 for v in vals]
+    rects = _squarify(sizes, 0.0, 0.0, 16.0, 9.0)
+    assert len(rects) == len(vals)
+    assert sum(w * h for _, _, w, h in rects) == pytest.approx(144.0)
+    assert all(w > 0.3 and h > 0.3 for _, _, w, h in rects)  # 无塌缩细条
+    with pytest.raises(ValueError, match='矩形树图'):
+        treemap('t', ['a', 'b'], [120, -30])
+    with pytest.raises(ValueError, match='需有正值'):
+        treemap('t', ['a', 'b'], [0, 0])
 
 
 def test_numfmt_chinese_units():
@@ -478,7 +548,7 @@ def test_same_name_not_overwritten_animated(tmp_path):
 
 
 def test_mp4_missing_ffmpeg(monkeypatch, tmp_path):
-    import chartgen.core as core
+    import vizkit.core as core
     monkeypatch.setattr(core.shutil, 'which', lambda _: None)
     with pytest.raises(RuntimeError, match='ffmpeg'):
         bar('t', CATS, VALS, out_dir=tmp_path, animate=True, fmt='mp4')

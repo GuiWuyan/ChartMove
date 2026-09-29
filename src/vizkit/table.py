@@ -1,6 +1,7 @@
 """表格文件读取与取列:CSV / Excel → 图表数据,CLI --file 与 MCP file 共用。
 
-CSV 兼容 UTF-8(-sig)与 GBK(Excel 中文导出常见);Excel 仅支持 .xlsx / .xlsm。
+CSV 兼容 UTF-8(-sig)与 GBK(Excel 中文导出常见);Excel 仅支持 .xlsx / .xlsm,
+sheet 参数按工作表名称或从 1 数的序号选择(缺省第一个;CSV 无工作表概念)。
 首行一律视为表头;列约定:类目列默认第 1 列,数值列 = 其余列(或 col 挑 1 列),
 各取数函数对应一类图表的列布局(bar/line/combo/box/xy/hist/heatmap,见各 docstring)。
 """
@@ -15,15 +16,20 @@ __all__ = [
 ]
 
 
-def read_table(path: str | Path) -> tuple[list[str], list[list[str]]]:
-    """读取表格,返回 (表头, 数据行);空行剔除,单元格已去空白。"""
+def read_table(path: str | Path, sheet=None) -> tuple[list[str], list[list[str]]]:
+    """读取表格,返回 (表头, 数据行);空行剔除,单元格已去空白。
+
+    sheet 仅对 Excel 有效:工作表名称或从 1 数的序号,缺省读第一个。
+    """
     p = Path(path)
     suffix = p.suffix.lower()
     if suffix not in ('.csv', '.xlsx', '.xlsm'):
         raise ValueError(f'不支持的表格格式 {suffix!r}(支持 .csv / .xlsx)')
     if not p.exists():
         raise ValueError(f'文件不存在: {path}')
-    header, rows = _read_csv(p) if suffix == '.csv' else _read_excel(p)
+    if sheet is not None and suffix == '.csv':
+        raise ValueError('CSV 没有工作表概念,sheet 仅对 Excel(.xlsx)有效')
+    header, rows = _read_csv(p) if suffix == '.csv' else _read_excel(p, sheet)
     if not header:
         raise ValueError('表格为空')
     return header, rows
@@ -53,11 +59,12 @@ def pick_column(spec: str | None, header: list[str], default: int | None = None)
     return idx
 
 
-def file_columns(path, cat_col=None, col=None) -> tuple[list[str], list[tuple[str, list[float]]]]:
+def file_columns(path, cat_col=None, col=None,
+                 sheet=None) -> tuple[list[str], list[tuple[str, list[float]]]]:
     """类目型图表取数(bar/line/area/pie/donut/waterfall/funnel/combo/多系列):
     类目列(默认第 1 列)+ 数值列(默认除类目列外全部;col 挑 1 列),
     返回 (类目, [(列名, 数值列表)]),数值列空单元格剔除。"""
-    header, rows = read_table(path)
+    header, rows = read_table(path, sheet)
     cat_i = pick_column(cat_col, header, 0)
     cats = [r[cat_i] if len(r) > cat_i else '' for r in rows]
     val_is = [pick_column(col, header)] if col else \
@@ -70,20 +77,20 @@ def file_columns(path, cat_col=None, col=None) -> tuple[list[str], list[tuple[st
     return cats, cols
 
 
-def file_box_groups(path) -> list[tuple[str, list[float]]]:
+def file_box_groups(path, sheet=None) -> list[tuple[str, list[float]]]:
     """箱线图取数:每列一组,首行表头 = 组名,单元格 = 原始样本(各组无需对齐)。"""
-    header, rows = read_table(path)
+    header, rows = read_table(path, sheet)
     return [(name or f'组{j + 1}',
              [to_float(r[j], f'(列「{name}」)')
               for r in rows if len(r) > j and r[j] != ''])
             for j, name in enumerate(header)]
 
 
-def file_xy(path, *, sizes=False) -> tuple[list[float], list[float],
-                                           list[float] | None, list[str] | None]:
+def file_xy(path, *, sizes=False, sheet=None) -> tuple[list[float], list[float],
+                                                       list[float] | None, list[str] | None]:
     """散点/气泡取数:列顺序 x, y(, sizes)(, labels),各列空单元格独立剔除
     (可能与 x/y 不对齐,由校验兜底);sizes=True 才读第 3 列气泡大小。"""
-    header, rows = read_table(path)
+    header, rows = read_table(path, sheet)
     xs = [to_float(r[0], '(列 1)') for r in rows if r and r[0] != '']
     ys = [to_float(r[1], '(列 2)') for r in rows if len(r) > 1 and r[1] != '']
     sz = [to_float(r[2], '(列 3)') for r in rows if len(r) > 2 and r[2] != ''] \
@@ -92,18 +99,18 @@ def file_xy(path, *, sizes=False) -> tuple[list[float], list[float],
     return xs, ys, sz, labels
 
 
-def file_samples(path) -> list[float]:
+def file_samples(path, sheet=None) -> list[float]:
     """直方图取数:第 1 列为原始样本。"""
-    header, rows = read_table(path)
+    header, rows = read_table(path, sheet)
     vals = [to_float(r[0], f'(列「{header[0]}」)') for r in rows if r and r[0] != '']
     if not vals:
         raise ValueError('第 1 列需为数值样本')
     return vals
 
 
-def file_matrix(path, cat_col=None) -> tuple[list[str], list[str], list[list[float]]]:
+def file_matrix(path, cat_col=None, sheet=None) -> tuple[list[str], list[str], list[list[float]]]:
     """热力图取数:类目列(默认第 1 列)= 行名,其余列为矩阵(表头 = 列名)。"""
-    header, rows = read_table(path)
+    header, rows = read_table(path, sheet)
     cat_i = pick_column(cat_col, header, 0)
     rlabels = [r[cat_i] if len(r) > cat_i else '' for r in rows]
     val_is = [j for j in range(len(header)) if j != cat_i]
@@ -128,15 +135,31 @@ def _read_csv(path) -> tuple[list[str], list[list[str]]]:
     return [c.strip() for c in rows[0]], [[c.strip() for c in r] for r in rows[1:]]
 
 
-def _read_excel(path) -> tuple[list[str], list[list[str]]]:
+def _read_excel(path, sheet=None) -> tuple[list[str], list[list[str]]]:
     try:
         from openpyxl import load_workbook
     except ImportError as e:  # 延迟导入:纯 CSV 用户无需 openpyxl
         raise ValueError('读取 Excel 需要安装 openpyxl') from e
-    ws = load_workbook(path, read_only=True, data_only=True).active
+    wb = load_workbook(path, read_only=True, data_only=True)
+    ws = wb.active if sheet is None else wb[_resolve_sheet(wb, sheet)]
     rows = [['' if v is None else str(v).strip() for v in row]
             for row in ws.iter_rows(values_only=True)]
     rows = [r for r in rows if any(c for c in r)]
     if not rows:
         return [], []
     return rows[0], rows[1:]
+
+
+def _resolve_sheet(wb, sheet) -> str:
+    """按名称或从 1 数的序号定位工作表,返回表名(与列定位 pick_column 语义一致);
+    名称优先于序号:精确命中某工作表名时按名称解析('2024' 是常见年份表名)。"""
+    names = wb.sheetnames
+    if isinstance(sheet, str) and sheet in names:
+        return sheet
+    if isinstance(sheet, int) or (isinstance(sheet, str) and sheet.isdigit()):
+        idx = int(sheet)
+        if not 1 <= idx <= len(names):
+            raise ValueError(f'工作表序号 {idx} 超出范围,共 {len(names)} 个;'
+                             f'可用:{", ".join(names)}')
+        return names[idx - 1]
+    raise ValueError(f'找不到工作表 {sheet!r};可用:{", ".join(names)}')

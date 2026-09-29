@@ -3,10 +3,12 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "chartgen"
+name = "vizkit"
 dynamic = ["version"]
-description = "中文数据图表生成器:16 种图表 × 13 主题,输出 PNG/PDF/TIF/GIF/MP4,CLI 与 MCP 双入口"
+description = "中文数据图表生成器:20 种图表 × 13 主题,输出 PNG/PDF/TIF/GIF/MP4,CLI 与 MCP 双入口"
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [{ name = "Quasar" }]
 requires-python = ">=3.10"
 keywords = ["chart", "matplotlib", "chinese", "mcp", "gif", "animation"]
@@ -32,13 +34,13 @@ dependencies = [
 dev = ["pytest>=8.0", "pytest-xdist>=3.6", "ruff>=0.6"]
 
 [project.scripts]
-chartgen = "chartgen.cli:main"
+vizkit = "vizkit.cli:main"
 
 [tool.hatch.version]
-path = "src/chartgen/__init__.py"  # 版本单源化:pyproject 动态读 __version__
+path = "src/vizkit/__init__.py"  # 版本单源化:pyproject 动态读 __version__
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/chartgen"]
+packages = ["src/vizkit"]
 
 [tool.ruff]
 line-length = 100
@@ -50,7 +52,7 @@ select = ["E", "F", "W", "I", "UP"]
 
 [tool.ruff.lint.per-file-ignores]
 # matplotlib.use('Agg') 必须在 pyplot import 之前,模块顶部因此存在非 import 语句
-"src/chartgen/core.py" = ["E402"]
+"src/vizkit/core.py" = ["E402"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
