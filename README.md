@@ -78,7 +78,7 @@ stdio 传输,工具面收敛为 2 个;工具描述为英文(LLM 选工具靠它)
 ```bash
 py -3.13 -m venv .venv                              # Python >=3.10
 .venv/Scripts/python.exe -m pip install -e ".[dev]" # 可编辑安装 + pytest/ruff
-.venv/Scripts/python.exe -m pytest                  # smoke test(全量约 1.5 分钟)
+.venv/Scripts/python.exe -m pytest -n auto         # smoke test(pytest-xdist 并行,全量约 30 秒)
 .venv/Scripts/python.exe -m ruff check src tests examples
 .venv/Scripts/python.exe examples/make_all.py        # 一次生成全部 16 张,默认写入 ./Results/
 winget install Gyan.FFmpeg                          # 可选,仅 MP4 动画需要
