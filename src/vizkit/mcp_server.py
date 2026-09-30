@@ -261,9 +261,17 @@ def _from_file(type, title, file, cat_col, col, sheet, common, *, horizontal, tr
         cats, cols = file_columns(file, cat_col, col, sheet)
         _require(cols, 'file 至少需要 1 列数值')
         if len(cols) >= 2:  # 多数值列自动升级为多系列(与 CLI --file 一致)
-            upgrade = 'bar-multi' if type == 'bar' else 'line-multi'
-            return done((bar_multi if type == 'bar' else line_multi)(
-                title, cats, cols, **common), upgrade)
+            if type == 'bar':
+                return done(bar_multi(title, cats, cols, **common), 'bar-multi')
+            # 区间带只对单系列折线有意义:必须摘掉 lower/upper 再调 line_multi,
+            # 否则未知关键字 TypeError 裸穿 except(它不在中文转换的异常元组里)
+            if common.get('lower') is not None or common.get('upper') is not None:
+                raise ToolError('区间带 lower/upper 仅支持单系列折线;'
+                                'file 含多列数值时会升级为多系列折线,'
+                                '请用 col 指定其中 1 列')
+            multi_common = {k: v for k, v in common.items()
+                            if k not in ('lower', 'upper')}
+            return done(line_multi(title, cats, cols, **multi_common), 'line-multi')
         if type == 'bar':
             return done(bar(title, cats, cols[0][1], horizontal=horizontal, **common), type)
         return done(line(title, cats, cols[0][1], name=cols[0][0], **common), type)

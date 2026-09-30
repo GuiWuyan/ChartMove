@@ -131,6 +131,30 @@ def test_file_bar_auto_upgrade(tmp_path):
     assert Path(data['path']).stat().st_size > 0
 
 
+def test_file_line_multi_col_upgrade(tmp_path):
+    """回归:line + file 多数值列曾因 common 里的 lower/upper 关键字直接抛 TypeError
+    (即使调用方没传区间带,common 也恒有 lower=None / upper=None)。"""
+    f = _csv(tmp_path, '月份,线上,线下\n1月,120,80\n2月,200,90\n')
+    _, result = _call({'type': 'line', 'title': '趋势', 'file': f,
+                       'out_dir': str(tmp_path)})
+    assert not result.is_error
+    data = json.loads(result.content[0].text)
+    assert data['type'] == 'line-multi'
+    p = Path(data['path'])
+    assert p.exists() and p.stat().st_size > 0
+    p.unlink()
+
+
+def test_file_line_band_with_multi_col_rejected(tmp_path):
+    """区间带只支持单系列折线:多列 + lower 必须给中文错误,不能是裸 TypeError
+    (裸 TypeError 在 SDK 里只会变成无详情的 'Error executing tool make_chart')。"""
+    f = _csv(tmp_path, '月份,线上,线下\n1月,120,80\n2月,200,90\n')
+    _, result = _call({'type': 'line', 'title': 't', 'file': f,
+                       'lower': [1, 2], 'upper': [3, 4], 'out_dir': str(tmp_path)})
+    assert result.is_error
+    assert '区间带' in result.content[0].text
+
+
 def test_file_combo_and_heatmap(tmp_path):
     f = _csv(tmp_path, '月份,销量,客单价\n1月,120,86\n2月,200,92\n')
     _, result = _call({'type': 'combo', 'title': '量价', 'file': f,
