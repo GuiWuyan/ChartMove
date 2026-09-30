@@ -10,8 +10,8 @@ EXPECTED = {'bar', 'line', 'line_multi', 'area', 'pie', 'donut', 'rose', 'treema
 
 
 def test_chart_types_consistent_across_entries():
-    from vizkit import core, mcp_server
-    from vizkit.cli import _build_parser
+    from chartmove import core, mcp_server
+    from chartmove.cli import _build_parser
     dashed = {t.replace('_', '-') for t in EXPECTED}
     # core:20 个公开绘图函数一个不缺
     assert {t for t in EXPECTED if callable(getattr(core, t, None))} == EXPECTED

@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from vizkit import (
+from chartmove import (
     THEMES,
     area,
     bar,
@@ -39,7 +39,7 @@ from vizkit import (
     treemap,
     waterfall,
 )
-from vizkit.core import (
+from chartmove.core import (
     FRAMES,
     GIF_FPS,
     _bar_draw,
@@ -61,7 +61,7 @@ from vizkit.core import (
     _theme,
     _waterfall_draw,
 )
-from vizkit.themes import THEME_DESCS, THEME_LABELS, THEME_PACKS
+from chartmove.themes import THEME_DESCS, THEME_LABELS, THEME_PACKS
 
 HAS_FFMPEG = shutil.which('ffmpeg') is not None
 
@@ -537,7 +537,7 @@ def test_line_band_draws_polygon():
 
 def test_squarify_tiling():
     """squarify 必须铺满画布且面积正比于值(回归:归一化错误会让全部格子塌缩成细条)。"""
-    from vizkit.core import _squarify
+    from chartmove.core import _squarify
     vals = [420, 300, 180, 100, 60]
     sizes = [v / sum(vals) * 16.0 * 9.0 for v in vals]
     rects = _squarify(sizes, 0.0, 0.0, 16.0, 9.0)
@@ -618,7 +618,7 @@ def test_same_name_not_overwritten_animated(tmp_path):
 
 
 def test_mp4_missing_ffmpeg(monkeypatch, tmp_path):
-    import vizkit.core as core
+    import chartmove.core as core
     monkeypatch.setattr(core.shutil, 'which', lambda _: None)
     with pytest.raises(RuntimeError, match='ffmpeg'):
         bar('t', CATS, VALS, out_dir=tmp_path, animate=True, fmt='mp4')

@@ -4,14 +4,14 @@
 届时每种用到的图表类型都必须出图不抛异常且文件存在。
 """
 
-import vizkit
+import chartmove
 
 
 def test_package_importable():
-    assert vizkit.__version__
+    assert chartmove.__version__
 
 
 def test_version_format():
-    parts = vizkit.__version__.split(".")
+    parts = chartmove.__version__.split(".")
     assert len(parts) == 3
     assert all(part.isdigit() for part in parts)

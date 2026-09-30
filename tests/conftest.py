@@ -5,7 +5,7 @@
 """
 import pytest
 
-from vizkit import core
+from chartmove import core
 
 LIGHT_FRAMES = 8
 

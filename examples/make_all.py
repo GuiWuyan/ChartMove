@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import argparse
 
-from vizkit import (
+from chartmove import (
     THEMES,
     area,
     bar,
@@ -99,7 +99,7 @@ def make_all(out_dir=None, animate=False) -> list:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description='生成全部 20 种示例图(默认写 ./Results/)')
-    ap.add_argument('--out-dir', default=None, help='输出目录(默认 VIZKIT_OUT_DIR 或 ./Results)')
+    ap.add_argument('--out-dir', default=None, help='输出目录(默认 CHARTMOVE_OUT_DIR 或 ./Results)')
     ap.add_argument('--animate', action='store_true', help='出 GIF 动画(默认 PNG)')
     args = ap.parse_args()
     paths = make_all(args.out_dir, args.animate)

@@ -24,7 +24,7 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 pytestmark = pytest.mark.xdist_group('mcp')
 
 PARAMS = StdioServerParameters(command=sys.executable,
-                               args=['-m', 'vizkit.mcp_server'])
+                               args=['-m', 'chartmove.mcp_server'])
 # MCP 子进程 stderr 的去向:默认 errlog=sys.stderr 在 pytest 下是捕获对象(须带
 # fileno 的真实流,故不能用 StringIO/内存缓冲),导到 devnull 免得污染输出
 _DEVNULL = open(os.devnull, 'w', encoding='utf-8')

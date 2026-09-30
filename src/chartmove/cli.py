@@ -1,17 +1,17 @@
 """CLI 入口(M2):20 种图表类型,一条命令出图。
 
-    vizkit bar "季度产量" Q1=120 Q2=200 Q3=90 --style mckinsey
-    vizkit rose "品类占比" 手机=320 电脑=210 平板=150    # 玫瑰图(极坐标柱状)
-    vizkit line "月度增长" --data data.json        # {"categories": [...], "values": [...]}
-    vizkit line-multi "对比" --categories 1月,2月,3月 --series series.json
-    vizkit combo "销量与客单价" Q1=120 Q2=200 --line 86,92
-    vizkit scatter "分布" --x 1,2,3 --y 5,7,6 --trend
-    vizkit hist "响应时长" 12 15 18 22 --bins 8
-    vizkit box "A/B 测试" --series samples.json    # [["对照组", [3.1, ...]], ...]
-    vizkit heatmap "热力" --data heat.json
+    chartmove bar "季度产量" Q1=120 Q2=200 Q3=90 --style mckinsey
+    chartmove rose "品类占比" 手机=320 电脑=210 平板=150    # 玫瑰图(极坐标柱状)
+    chartmove line "月度增长" --data data.json        # {"categories": [...], "values": [...]}
+    chartmove line-multi "对比" --categories 1月,2月,3月 --series series.json
+    chartmove combo "销量与客单价" Q1=120 Q2=200 --line 86,92
+    chartmove scatter "分布" --x 1,2,3 --y 5,7,6 --trend
+    chartmove hist "响应时长" 12 15 18 22 --bins 8
+    chartmove box "A/B 测试" --series samples.json    # [["对照组", [3.1, ...]], ...]
+    chartmove heatmap "热力" --data heat.json
     #   heat.json: {"rows": [...], "cols": [...], "values": [[...], ...]}
-    vizkit themes                                  # 列出全部主题(按风格包)
-    vizkit themes --preview                        # 列主题并生成预览拼版图
+    chartmove themes                                  # 列出全部主题(按风格包)
+    chartmove themes --preview                        # 列主题并生成预览拼版图
 
 数据约定:单系列用"类目=值"内联;--data / --series 接内联 JSON 字符串或文件路径。
 """
@@ -385,20 +385,20 @@ def _themes_cmd(args) -> int:
 
 def _build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
-        prog='vizkit', description='中文数据图表生成器(默认输出 ./Results/)')
+        prog='chartmove', description='中文数据图表生成器(默认输出 ./Results/)')
     ap.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
     sub = ap.add_subparsers(dest='type', required=True, metavar='类型')
 
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument('title', help='图表标题')
     common.add_argument('--style', choices=list(THEMES), default='business',
-                        help='主题(默认 business,vizkit themes 可查)')
+                        help='主题(默认 business,chartmove themes 可查)')
     common.add_argument('--animate', action='store_true', help='生成动画(默认 GIF)')
     common.add_argument('--loop', action='store_true',
                         help='GIF 无限循环(默认播一遍停在末帧;MP4 循环由播放器决定,不支持)')
     common.add_argument('--fmt', choices=['png', 'gif', 'mp4', 'pdf', 'tif'], default=None,
                         help='输出格式;静态默认 png,动画默认 gif')
-    common.add_argument('--out-dir', help='输出目录(默认 VIZKIT_OUT_DIR 或 ./Results/)')
+    common.add_argument('--out-dir', help='输出目录(默认 CHARTMOVE_OUT_DIR 或 ./Results/)')
     common.add_argument('--out', help='输出文件名(不含扩展名),默认 类型_标题')
     common.add_argument('--dpi', type=float, help='分辨率(默认静态 150 / tif 600 / GIF 75)')
     common.add_argument('--figsize', help='画幅 宽x高,如 12.8x7.2')
@@ -485,7 +485,7 @@ def _build_parser() -> argparse.ArgumentParser:
     themes_sp = sub.add_parser('themes', help='列出全部主题(按风格包)')
     themes_sp.add_argument('--preview', action='store_true',
                            help='同时生成主题预览拼版图(全部主题 × 同一组迷你柱状图)')
-    themes_sp.add_argument('--out-dir', help='预览图输出目录(默认 VIZKIT_OUT_DIR 或 ./Results/)')
+    themes_sp.add_argument('--out-dir', help='预览图输出目录(默认 CHARTMOVE_OUT_DIR 或 ./Results/)')
     themes_sp.add_argument('--out', help='预览图文件名(不含扩展名,默认 themes_预览)')
     themes_sp.set_defaults(func=_themes_cmd)
     return ap

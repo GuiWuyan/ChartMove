@@ -1,4 +1,4 @@
-"""fonts.py 单测:import vizkit 后字体环境即就绪(Windows 命中微软雅黑)。"""
+"""fonts.py 单测:import chartmove 后字体环境即就绪(Windows 命中微软雅黑)。"""
 from __future__ import annotations
 
 import sys
@@ -6,7 +6,7 @@ import sys
 import pytest
 from matplotlib import rcParams
 
-from vizkit import fonts
+from chartmove import fonts
 
 
 def test_rcparams_ready():

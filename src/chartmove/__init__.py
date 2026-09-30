@@ -1,11 +1,11 @@
-"""vizkit —— 中文数据图表生成器(人可用、AI 可调)。
+"""chartmove —— 中文数据图表生成器(人可用、AI 可调)。
 
 matplotlib 内核,20 种图表 × 13 主题(4 风格包),输出 PNG / PDF / TIF / GIF / MP4;
 入口:CLI 与 MCP Server(GUI 已取消)。
 
-    from vizkit import bar, line, pie, donut, area, combo, line_multi, bar_multi, radar
+    from chartmove import bar, line, pie, donut, area, combo, line_multi, bar_multi, radar
     path = bar('季度产量', ['Q1', 'Q2', 'Q3'], [120, 200, 90], style='cyberpunk', animate=True)
-    # -> .../VizKit/bar_季度产量.gif
+    # -> .../Chartmove/bar_季度产量.gif
 """
 from ._version import __version__
 from .themes import THEME_DESCS, THEME_LABELS, THEME_PACKS, THEMES
@@ -17,8 +17,8 @@ __all__ = [
     "THEMES", "THEME_PACKS", "THEME_LABELS", "THEME_DESCS", "__version__",
 ]
 
-# 惰性导出(PEP 562):图表函数在 core,import vizkit 不应为此付 matplotlib 启动成本
-# (vizkit themes / --version / MCP 启动都走这条路径);首次取属性才加载内核。
+# 惰性导出(PEP 562):图表函数在 core,import chartmove 不应为此付 matplotlib 启动成本
+# (chartmove themes / --version / MCP 启动都走这条路径);首次取属性才加载内核。
 _CHART_EXPORTS = frozenset({
     "area", "bar", "bar_multi", "box", "bubble", "combo", "donut", "dumbbell",
     "funnel", "gantt", "heatmap", "hist", "line", "line_multi", "pie", "radar",

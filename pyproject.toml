@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "vizkit"
+name = "chartmove"
 dynamic = ["version"]
 description = "中文数据图表生成器:20 种图表 × 13 主题,输出 PNG/PDF/TIF/GIF/MP4,CLI 与 MCP 双入口"
 readme = "README.md"
@@ -35,19 +35,19 @@ dependencies = [
 dev = ["pytest>=8.0", "pytest-xdist>=3.6", "ruff>=0.6"]
 
 [project.scripts]
-vizkit = "vizkit.cli:main"
-vizkit-mcp = "vizkit.mcp_server:main"
+chartmove = "chartmove.cli:main"
+chartmove-mcp = "chartmove.mcp_server:main"
 
 [project.urls]
-Homepage = "https://github.com/GuiWuyan/VizKit"
-Repository = "https://github.com/GuiWuyan/VizKit"
-Issues = "https://github.com/GuiWuyan/VizKit/issues"
+Homepage = "https://github.com/GuiWuyan/Chartmove"
+Repository = "https://github.com/GuiWuyan/Chartmove"
+Issues = "https://github.com/GuiWuyan/Chartmove/issues"
 
 [tool.hatch.version]
-path = "src/vizkit/_version.py"  # 版本单源化:叶子模块,import 不触发 matplotlib(P2-1)
+path = "src/chartmove/_version.py"  # 版本单源化:叶子模块
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/vizkit"]
+packages = ["src/chartmove"]
 
 [tool.ruff]
 line-length = 100
@@ -59,7 +59,7 @@ select = ["E", "F", "W", "I", "UP"]
 
 [tool.ruff.lint.per-file-ignores]
 # matplotlib.use('Agg') 必须在 pyplot import 之前,模块顶部因此存在非 import 语句
-"src/vizkit/core.py" = ["E402"]
+"src/chartmove/core.py" = ["E402"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

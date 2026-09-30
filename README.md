@@ -1,4 +1,4 @@
-# VizKit(vizkit)
+# Chartmove(chartmove)
 
 **数据图表生成工具** 
 matplotlib 内核,20 种图表 × 13 主题(4 风格包),输出 PNG / PDF / TIF / GIF / MP4;入口为 CLI 与 MCP Server(AI / agent 调用)
@@ -6,22 +6,22 @@ matplotlib 内核,20 种图表 × 13 主题(4 风格包),输出 PNG / PDF / TIF 
 ## 目录结构
 
 ```
-├─ src/vizkit/     # 包:core 内核 + themes / fonts / output + cli / mcp_server
+├─ src/chartmove/     # 包:core 内核 + themes / fonts / output + cli / mcp_server
 ├─ tests/            # 20 图 × 3 输出 smoke test 矩阵 + CLI / 单元测试
 └─ examples/         # make_all.py:一条命令生成全部 20 种示例图,兼任用法文档
 ```
 
 ## CLI
 
-命令结构:**`vizkit <类型> "标题" [数据] [通用参数] [类型专属参数]`**,输出文件绝对路径,默认写入 `./Results/`。
+命令结构:**`chartmove <类型> "标题" [数据] [通用参数] [类型专属参数]`**,输出文件绝对路径,默认写入 `./Results/`。
 
-20 种类型:`bar` / `line` / `line-multi` / `area` / `pie` / `donut` / `rose` / `treemap` / `combo` / `bar-multi` / `radar` / `scatter` / `bubble` / `hist` / `box` / `heatmap` / `waterfall` / `funnel` / `gantt` / `dumbbell`(多词类型用 kebab-case;`vizkit --help` 看总览,`vizkit bar --help` 看单类型全部参数)。
+20 种类型:`bar` / `line` / `line-multi` / `area` / `pie` / `donut` / `rose` / `treemap` / `combo` / `bar-multi` / `radar` / `scatter` / `bubble` / `hist` / `box` / `heatmap` / `waterfall` / `funnel` / `gantt` / `dumbbell`(多词类型用 kebab-case;`chartmove --help` 看总览,`chartmove bar --help` 看单类型全部参数)。
 
 **数据的四种写法**(按类型任选其一,`--file` 优先级最高):
 
 | 方式 | 适用类型 | 示例 |
 |---|---|---|
-| 内联 `类目=值` | 单系列类目型 | `vizkit bar "季度产量" Q1=120 Q2=200` |
+| 内联 `类目=值` | 单系列类目型 | `chartmove bar "季度产量" Q1=120 Q2=200` |
 | `--data` JSON(内联字符串或文件路径) | 单系列 | `--data '{"categories":["Q1"],"values":[120]}'` 或 `--data data.json` |
 | `--series` JSON + `--categories` | 多系列:`line-multi` / `bar-multi` / `radar` / `box` | `--series '[["销售额",[1,2]],...]'`(也接受 `{名称: [值...]}`) |
 | `--file` CSV / Excel | 全部类型 | `--file sales.csv --cat-col 基金名称 --col "盈亏率(%)"` |
@@ -30,7 +30,7 @@ matplotlib 内核,20 种图表 × 13 主题(4 风格包),输出 PNG / PDF / TIF 
 
 | 参数 | 说明 |
 |---|---|
-| `--style` | 13 主题 × 4 风格包,默认 business;`vizkit themes` 列出全部 |
+| `--style` | 13 主题 × 4 风格包,默认 business;`chartmove themes` 列出全部 |
 | `--animate` | 出"数据生长"动画(默认 GIF,`--fmt mp4` 可出 MP4) |
 | `--loop` | 配合 `--animate`:GIF 无限循环(默认播一遍停在末帧;MP4 循环由播放器决定,不支持) |
 | `--fmt` | `png`(静态默认)/ `pdf` 矢量 / `tif` 600dpi / `gif`(动画默认)/ `mp4` |
@@ -61,12 +61,12 @@ matplotlib 内核,20 种图表 × 13 主题(4 风格包),输出 PNG / PDF / TIF 
 **`--file` 列约定**(CSV / Excel,首行表头;CSV 兼容 UTF-8 与 GBK):默认第 1 列类目、其余列数值,多数值列时 bar/line 自动转多系列图(系列名 = 表头);combo 取类目列后两列(柱、线);box 每列一组(表头 = 组名);scatter/bubble 按 x, y(, sizes)(, labels) 取列;heatmap 类目列 = 行名、表头 = 列名;hist 第 1 列为原始样本;宽表用 `--cat-col` / `--col` 选列,Excel 多工作表用 `--sheet` 选(名称或从 1 数的序号)。
 
 ```bash
-vizkit bar "季度产量" Q1=120 Q2=200 Q3=90 --style mckinsey                  # 内联数据
-vizkit line "营收预测" 1月=120 2月=135 3月=128 --lower 112,125,116 --upper 128,145,140      # 折线区间带
-vizkit line "盈亏率" --file 基金.csv --cat-col 基金名称 --col "盈亏率(%)" --style cyberpunk   # 表格选列
-vizkit rose "品类销量" --file 销量.xlsx --sheet 2024          # 玫瑰图,读指定工作表
-vizkit themes                                  # 查看 13 主题 × 4 风格包
-vizkit themes --preview                        # 另出主题预览拼版图(PNG)
+chartmove bar "季度产量" Q1=120 Q2=200 Q3=90 --style mckinsey                  # 内联数据
+chartmove line "营收预测" 1月=120 2月=135 3月=128 --lower 112,125,116 --upper 128,145,140      # 折线区间带
+chartmove line "盈亏率" --file 基金.csv --cat-col 基金名称 --col "盈亏率(%)" --style cyberpunk   # 表格选列
+chartmove rose "品类销量" --file 销量.xlsx --sheet 2024          # 玫瑰图,读指定工作表
+chartmove themes                                  # 查看 13 主题 × 4 风格包
+chartmove themes --preview                        # 另出主题预览拼版图(PNG)
 ```
 
 ## MCP Server(AI / agent 接入)
@@ -76,34 +76,45 @@ stdio 传输,工具面收敛为 2 个;工具描述为英文(LLM 选工具靠它)
 ### 启动
 
 ```bash
-vizkit-mcp                   # pip install 后可直接用(见 pyproject [project.scripts])
-python -m vizkit.mcp_server  # 或不经控制台脚本
+chartmove-mcp                   # pip install 后可直接用(见 pyproject [project.scripts])
+python -m chartmove.mcp_server  # 或不经控制台脚本
 ```
 
-MCP host(Claude Desktop / ZCode 等)的 `mcpServers` 配置:
+各 host 的配置文件格式不一(JSON / TOML / YAML),但写入的启动信息相同:`command` = `chartmove-mcp`、`args` = `[]`,按所用 host 对号入座:
+
+JSON 系(Claude Desktop / ZCode / Cursor / Cline 等,`mcpServers` 字段):
 
 ```json
 {
   "mcpServers": {
-    "vizkit": { "command": "vizkit-mcp", "args": [] }
+    "chartmove": { "command": "chartmove-mcp", "args": [] }
   }
 }
 ```
 
-host 常不继承 shell 的 PATH(Windows 尤其),解析不到虚拟环境里的脚本时用绝对路径:
+TOML 系(Codex CLI,`~/.codex/config.toml`):
 
-```json
-{
-  "mcpServers": {
-    "vizkit": {
-      "command": "D:/path/to/VizKit/.venv/Scripts/python.exe",
-      "args": ["-m", "vizkit.mcp_server"]
-    }
-  }
-}
+```toml
+[mcp_servers.chartmove]
+command = "chartmove-mcp"
+args = []
 ```
 
-> MCP 的 stdout 是 JSON-RPC 独占通道,内核提示信息已由服务端重定向到 stderr;不要在启动命令上追加 `2>&1` 之类的重定向,会污染协议流。
+YAML 系(DeepSeek Harness,每条 `insert` 注册一个 MCP client):
+
+```yaml
+- insert:
+    - id: mcp-chartmove
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: chartmove
+        transport: stdio
+        command: chartmove-mcp
+        args: []                   # 此时改为 ['-m', 'chartmove.mcp_server']
+```
+
+Windows host 报中文编码错时,可在 `env` 里加 `PYTHONUTF8 = "1"`(TOML)或 `PYTHONUTF8: '1'`(YAML)。
+
 
 | 工具 | 参数 | 返回 |
 |---|---|---|
@@ -138,7 +149,7 @@ CI:push / PR 自动跑 ruff lint + pytest smoke test,见 `.github/workflows/ci.y
 - 差异化:最大/最小值自动高亮、y 轴智能从 0 起、中文字体零配置(Windows 雅黑 / macOS 苹方 / Linux Noto CJK,见 fonts.py);数值标签/刻度默认中文单位(`numfmt='auto'`:≥1e4 万、≥1e8 亿,percent 追加 %,plain 原样);`note` 参数出底部脚注(数据来源 / 备注)
 - 柱类 / 饼类图 values 需 >=0,负值直接报中文错误(bar 会提示改用 waterfall;瀑布图 / 直方图 / 折线类不受限);nan / inf 同样报错
 - 大数据:类目 >25 刻度自动抽稀、折线标记超 50 个隔点绘制;`line` / `area` / `line-multi` 支持 `--sample` / `sample=` LTTB 保形降采样(数千行 CSV 出图)
-- 输出目录:默认项目内 `./Results/`(持久,不做 TTL 清理;同名文件自动加序号 `_2`/`_3`,不覆盖已有产物);优先级 `out_dir=` / `--out-dir` 参数 > 环境变量 `VIZKIT_OUT_DIR` > 默认
+- 输出目录:默认项目内 `./Results/`(持久,不做 TTL 清理;同名文件自动加序号 `_2`/`_3`,不覆盖已有产物);优先级 `out_dir=` / `--out-dir` 参数 > 环境变量 `CHARTMOVE_OUT_DIR` > 默认
 - 表格直读:CLI `--file` 支持 CSV(UTF-8 / GBK)与 Excel(.xlsx / .xlsm),`--sheet` / `sheet=` 选 Excel 工作表(名称或从 1 数的序号),见 table.py
 
 依赖:matplotlib、mcp(官方 SDK,2.x 起 API 为 `MCPServer`)、pillow、openpyxl(Excel 读取).
