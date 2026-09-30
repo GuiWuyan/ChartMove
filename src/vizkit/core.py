@@ -349,16 +349,13 @@ def _pie_like_draw(title, cats, vals, th, donut=False, show_values=True):
         wedges = dict(edgecolor='white', linewidth=2)
         if donut:
             wedges['width'] = 0.42
-        _, texts, autotexts = ax.pie(
+        # 数值已由外标签给出,扇区内不再重复标注(<6% 的小扇区也不丢数);
+        # 不解包返回值:autopct=None 时 pie 只返回二元,曾把 show_values=False 路径炸穿
+        ax.pie(
             vis, labels=labels, labeldistance=1.12,
             colors=[th['palette'][i % len(th['palette'])] for i in range(len(vals))],
-            autopct=(lambda pct: _nf(round(pct / 100 * total), th) if pct > 6 else '')
-                    if show_values else None,
-            pctdistance=0.79, startangle=90, counterclock=False,
+            autopct=None, startangle=90, counterclock=False,
             textprops={'fontsize': 13, 'color': th['text']}, wedgeprops=wedges)
-        for at in autotexts:
-            at.set_color('white')
-            at.set_fontsize(12)
         ax.set_title(title, fontsize=20, pad=18, color=th['text'])
         _legend_bottom(ax, [Line2D([0], [0], linestyle='none', marker='s', markersize=10,
                                    markerfacecolor=th['palette'][i % len(th['palette'])],

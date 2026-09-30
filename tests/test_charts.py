@@ -55,6 +55,7 @@ from vizkit.core import (
     _line_multi_draw,
     _lttb_indices,
     _nf,
+    _pie_like_draw,
     _scatter_draw,
     _stagger,
     _theme,
@@ -322,6 +323,32 @@ def test_waterfall_total_false():
         rects = sorted(ax.patches, key=lambda r: r.get_x())
         assert len(rects) == 3                      # 无「合计」柱
         assert [r.get_height() for r in rects] == pytest.approx([100, 40, 50])
+    finally:
+        plt.close(fig)
+
+
+def test_pie_value_not_duplicated():
+    """回归:饼图数值曾在外标签与扇区内重复出现(图例再列一遍类目)。
+    修复后数值只保留在外标签,<6% 的小扇区也不丢数。"""
+    fig, ax = plt.subplots()
+    try:
+        _pie_like_draw('t', ['A', 'B', '小'], [70, 25, 5],
+                       _theme('business'))(ax, 1.0)
+        assert not [t for t in ax.texts if t.get_text() == '70']  # 扇区内无重复数值
+        assert any('A 70' in t.get_text() for t in ax.texts)      # 数值在外标签
+        assert any('小 5' in t.get_text() for t in ax.texts)      # 小扇区不丢数
+    finally:
+        plt.close(fig)
+
+
+def test_donut_show_values_false():
+    """回归:donut(show_values=False) 曾因解包 ax.pie 的二元返回值直接 ValueError。"""
+    fig, ax = plt.subplots()
+    try:
+        _pie_like_draw('t', ['A', 'B'], [70, 30], _theme('business'),
+                       donut=True, show_values=False)(ax, 1.0)
+        assert not [t for t in ax.texts if '70' in t.get_text()]  # 不标数值
+        assert any(t.get_text() == 'A' for t in ax.texts)         # 只标类目名
     finally:
         plt.close(fig)
 
