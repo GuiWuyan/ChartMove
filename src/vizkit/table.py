@@ -11,8 +11,8 @@ import csv
 from pathlib import Path
 
 __all__ = [
-    'read_table', 'to_float', 'pick_column', 'file_columns', 'file_box_groups',
-    'file_xy', 'file_samples', 'file_matrix',
+    'read_table', 'to_float', 'parse_float', 'pick_column', 'file_columns',
+    'file_box_groups', 'file_xy', 'file_samples', 'file_matrix',
 ]
 
 
@@ -33,6 +33,19 @@ def read_table(path: str | Path, sheet=None) -> tuple[list[str], list[list[str]]
     if not header:
         raise ValueError('表格为空')
     return header, rows
+
+
+def parse_float(text, where: str = '') -> float:
+    """内联标量转数值:容忍千分位逗号与空白;失败报中文并指出位置。
+
+    float() 的原味英文异常(could not convert ...)不允许透传到用户面前;
+    nan / inf 在这里是合法浮点,由 core._check_finite 负责报中文错,勿在此拦截。
+    """
+    s = str(text).replace(',', '').strip()
+    try:
+        return float(s)
+    except ValueError:
+        raise ValueError(f'需要数值,收到 {text!r}{where}') from None
 
 
 def to_float(cell, where: str = '') -> float:
@@ -138,7 +151,7 @@ def _read_csv(path) -> tuple[list[str], list[list[str]]]:
 def _read_excel(path, sheet=None) -> tuple[list[str], list[list[str]]]:
     try:
         from openpyxl import load_workbook
-    except ImportError as e:  # 延迟导入:纯 CSV 用户无需 openpyxl
+    except ImportError as e:  # 延迟导入:纯 CSV 路径不付 openpyxl 的导入成本(包声明为硬依赖)
         raise ValueError('读取 Excel 需要安装 openpyxl') from e
     wb = load_workbook(path, read_only=True, data_only=True)
     ws = wb.active if sheet is None else wb[_resolve_sheet(wb, sheet)]

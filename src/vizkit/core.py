@@ -34,7 +34,7 @@ from matplotlib.patches import Patch, Rectangle
 from matplotlib.ticker import FuncFormatter
 
 from .fonts import setup_fonts, sketch_font_chain
-from .output import next_path, resolve_out_dir, safe_stem
+from .output import claim_path, resolve_out_dir, safe_stem
 from .themes import THEME_LABELS, THEMES
 
 setup_fonts()
@@ -349,16 +349,13 @@ def _pie_like_draw(title, cats, vals, th, donut=False, show_values=True):
         wedges = dict(edgecolor='white', linewidth=2)
         if donut:
             wedges['width'] = 0.42
-        _, texts, autotexts = ax.pie(
+        # 数值已由外标签给出,扇区内不再重复标注(<6% 的小扇区也不丢数);
+        # 不解包返回值:autopct=None 时 pie 只返回二元,曾把 show_values=False 路径炸穿
+        ax.pie(
             vis, labels=labels, labeldistance=1.12,
             colors=[th['palette'][i % len(th['palette'])] for i in range(len(vals))],
-            autopct=(lambda pct: _nf(round(pct / 100 * total), th) if pct > 6 else '')
-                    if show_values else None,
-            pctdistance=0.79, startangle=90, counterclock=False,
+            autopct=None, startangle=90, counterclock=False,
             textprops={'fontsize': 13, 'color': th['text']}, wedgeprops=wedges)
-        for at in autotexts:
-            at.set_color('white')
-            at.set_fontsize(12)
         ax.set_title(title, fontsize=20, pad=18, color=th['text'])
         _legend_bottom(ax, [Line2D([0], [0], linestyle='none', marker='s', markersize=10,
                                    markerfacecolor=th['palette'][i % len(th['palette'])],
@@ -670,12 +667,13 @@ def _heatmap_draw(title, rows, cols, arr, th, annotate=True):
     return draw
 
 
-def _waterfall_draw(title, cats, vals, th):
+def _waterfall_draw(title, cats, vals, th, total=True):
     bars, acc = [], 0.0  # (label, value 或 None=合计, 起点)
     for c, v in zip(cats, vals):
         bars.append((c, v, acc))
         acc += v
-    bars.append(('合计', None, acc))
+    if total:
+        bars.append(('合计', None, acc))
 
     def draw(ax, p):
         _style(ax, title, th)
@@ -949,18 +947,22 @@ def _render(kind, title, draw, *, animate, fmt, out, out_dir=None, loop=False,
                 writer = _GifWriter(fps=GIF_FPS, loop=loop)
                 path, fps, dpi_eff = out_path / f'{stem}.gif', GIF_FPS, (dpi or DPI_GIF)
 
-            path = next_path(path)  # 同名不覆盖,自动追加序号
-            fig = plt.figure(figsize=fig_size, facecolor=fig_face)
-
-            def update(i):
-                fig.clear()  # 连同 twinx 一起清空,避免帧间残留
-                draw(fig.add_subplot(111, polar=polar), i / (FRAMES - 1))
-                _note(fig, th)
-
-            ani = animation.FuncAnimation(fig, update, frames=FRAMES, interval=1000 / fps)
+            path = claim_path(path)  # 原子占位:并发下也保证"同名不覆盖"
             try:
+                fig = plt.figure(figsize=fig_size, facecolor=fig_face)
+
+                def update(i):
+                    fig.clear()  # 连同 twinx 一起清空,避免帧间残留
+                    draw(fig.add_subplot(111, polar=polar), i / (FRAMES - 1))
+                    _note(fig, th)
+
+                ani = animation.FuncAnimation(fig, update, frames=FRAMES,
+                                              interval=1000 / fps)
                 ani.save(path, writer=writer, dpi=dpi_eff,
                          savefig_kwargs={'facecolor': fig_face})
+            except BaseException:
+                path.unlink(missing_ok=True)   # 占位后失败:别留 0 字节垃圾
+                raise
             finally:
                 plt.close('all')
         else:
@@ -969,13 +971,18 @@ def _render(kind, title, draw, *, animate, fmt, out, out_dir=None, loop=False,
                                  '动画请传 animate=True(仅 gif / mp4)')
             if loop:
                 raise ValueError('loop 仅对动画生效,需 animate=True(仅 gif)')
-            path = next_path(out_path / f'{stem}.{fmt}')  # 同名不覆盖,自动追加序号
+            path = claim_path(out_path / f'{stem}.{fmt}')  # 原子占位:并发下不覆盖
             dpi_eff = dpi or (DPI_TIF if fmt == 'tif' else DPI_PNG)
-            fig = plt.figure(figsize=fig_size, facecolor=fig_face)
-            draw(fig.add_subplot(111, polar=polar), 1.0)
-            _note(fig, th)
-            fig.savefig(path, dpi=dpi_eff, facecolor=fig_face)
-            plt.close(fig)
+            try:
+                fig = plt.figure(figsize=fig_size, facecolor=fig_face)
+                draw(fig.add_subplot(111, polar=polar), 1.0)
+                _note(fig, th)
+                fig.savefig(path, dpi=dpi_eff, facecolor=fig_face)
+            except BaseException:
+                path.unlink(missing_ok=True)   # 占位后失败:别留 0 字节垃圾
+                raise
+            finally:
+                plt.close(fig)
 
         print(f'图表已生成: {path}')
         return path
@@ -1082,6 +1089,8 @@ def _theme(style: str | None, numfmt: str = 'auto', note: str | None = None) -> 
     """主题 + 全局展示选项:numfmt 数值格式(auto / plain / percent),note 底部脚注。"""
     if numfmt not in ('auto', 'plain', 'percent'):
         raise ValueError(f'numfmt 仅支持 auto / plain / percent,收到 {numfmt!r}')
+    if style and style not in THEMES:  # None / '' 仍回退 business(保持既有调用方兼容)
+        raise ValueError(f'未知主题 {style!r};可选:{", ".join(THEMES)}')
     th = THEMES.get(style or 'business', THEMES['business'])
     return dict(th, palette=list(th['palette']), numfmt=numfmt, note=note)
 
@@ -1334,8 +1343,7 @@ def waterfall(title: str, categories, values, *, total=True, style='business',
     cats, vals = _validate(categories, values)
     th = _theme(style, numfmt, note)
     return _render('waterfall', title,
-                   _waterfall_draw(title, cats, list(vals) + [None] if total else list(vals),
-                                   th),
+                   _waterfall_draw(title, cats, vals, th, total),
                    animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)
 
@@ -1406,8 +1414,13 @@ def themes_preview(*, out: str | None = None, out_dir=None, dpi=None) -> Path:
         fig.add_subplot(rows, cols, j + 1).axis('off')
     fig.subplots_adjust(left=0.04, right=0.985, top=0.93, bottom=0.04,
                         hspace=0.62, wspace=0.22)
-    path = next_path(resolve_out_dir(out_dir) / f'{safe_stem("themes", "预览", out)}.png')
-    fig.savefig(path, dpi=dpi or DPI_PNG, facecolor='white')
-    plt.close(fig)
+    path = claim_path(resolve_out_dir(out_dir) / f'{safe_stem("themes", "预览", out)}.png')
+    try:
+        fig.savefig(path, dpi=dpi or DPI_PNG, facecolor='white')
+    except BaseException:
+        path.unlink(missing_ok=True)   # 占位后失败:别留 0 字节垃圾
+        raise
+    finally:
+        plt.close(fig)
     print(f'主题预览图已生成: {path}')
     return path

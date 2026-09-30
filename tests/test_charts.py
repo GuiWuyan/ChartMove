@@ -1,8 +1,8 @@
-"""冒烟测试:20 种图表类型 × PNG / GIF / MP4 全过。
+"""冒烟测试:20 种图表类型 × 静态 PNG 全量;动画按实现抽样 4 代表型 × GIF / MP4。
 
-矩阵内 line 自带区间带、dumbbell 为坡度图(slope=True),动画分支一并覆盖。
-另覆盖:pdf / tif 静态格式、13 主题、横向条形、figsize / dpi 参数、
-中文缺字检测与校验错误。产物写入 pytest 临时目录,断言后即删。
+矩阵内 line 自带区间带、dumbbell 为坡度图(slope=True);另覆盖:pdf / tif 静态格式、
+13 主题、横向条形、figsize / dpi 参数、中文缺字检测与校验错误。
+产物写入 pytest 临时目录,断言后即删。
 """
 from __future__ import annotations
 
@@ -55,6 +55,7 @@ from vizkit.core import (
     _line_multi_draw,
     _lttb_indices,
     _nf,
+    _pie_like_draw,
     _scatter_draw,
     _stagger,
     _theme,
@@ -120,14 +121,27 @@ def _assert_ok(path: Path, ext: str, warns: list[str]) -> None:
     path.unlink()  # 即测即删
 
 
-@pytest.mark.parametrize('fmt', ['png', 'gif', 'mp4'])
+ANIM_SAMPLE = ('bar', 'line', 'line_multi', 'heatmap')
+"""动画矩阵抽样(P4-2):20 类 × 2 动画曾是 CI 时长大头,按动画实现取代表——
+bar=逐根升起、line=渐进折线(含区间带逐帧展开)、line_multi=多系列渐进、heatmap=逐格淡入。"""
+
+
 @pytest.mark.parametrize('name', list(CASES))
-def test_matrix(name, fmt, tmp_path):
-    """验收主体:20 种类型 × 3 种输出。"""
+def test_matrix_static(name, tmp_path):
+    """验收主体:20 种类型 × 静态 PNG 全量(覆盖所有绘制分支,~0.1s/张)。"""
+    fn, kw = CASES[name]
+    path, warns = _render(fn, kw, tmp_path, fmt='png')
+    _assert_ok(path, 'png', warns)
+
+
+@pytest.mark.parametrize('fmt', ['gif', 'mp4'])
+@pytest.mark.parametrize('name', ANIM_SAMPLE)
+def test_matrix_animated(name, fmt, tmp_path):
+    """动画矩阵:抽样 4 个代表类型 × GIF / MP4,覆盖三种动画实现。"""
     if fmt == 'mp4' and not HAS_FFMPEG:
         pytest.skip('未安装 ffmpeg,跳过 MP4')
     fn, kw = CASES[name]
-    path, warns = _render(fn, kw, tmp_path, animate=fmt in ('gif', 'mp4'), fmt=fmt)
+    path, warns = _render(fn, kw, tmp_path, animate=True, fmt=fmt)
     _assert_ok(path, fmt, warns)
 
 
@@ -219,7 +233,7 @@ def _stability_draws() -> dict:
         'bubble': lambda: _bubble_draw('t', xs, ys, [10, 40, 5, 25, 35, 15], th),
         'hist': lambda: _hist_draw('t', [68, 72, 70, 75, 77, 80, 82, 85], 8, th),
         'box': lambda: _box_draw('t', [('组A', [3, 5, 4, 6, 7]), ('组B', [8, 9, 7])], th),
-        'waterfall': lambda: _waterfall_draw('t', cats, vals + [None], th),
+        'waterfall': lambda: _waterfall_draw('t', cats, vals, th),
         'funnel': lambda: _funnel_draw('t', ['访问', '加购'], [1000, 420], th),
     }
 
@@ -304,12 +318,60 @@ def test_waterfall_geometry():
     """瀑布图几何:正值柱从上一累计水平升起,负值柱向下悬挂,合计柱从 0 画到代数和(回归)。"""
     fig, ax = plt.subplots()
     try:
-        draw = _waterfall_draw('t', ['A', 'B', 'C'], [100, -40, 50, None],
-                               _theme('business'))
+        draw = _waterfall_draw('t', ['A', 'B', 'C'], [100, -40, 50], _theme('business'))
         draw(ax, 1.0)  # 终态:p=1 时每个元素的错峰进度均为 1
         rects = sorted(ax.patches, key=lambda r: r.get_x())
         assert [(r.get_y(), r.get_height()) for r in rects] == pytest.approx(
             [(0, 100), (60, 40), (60, 50), (0, 110)])
+    finally:
+        plt.close(fig)
+
+
+def test_hist_bins_edges_array():
+    """bins 边界数组直通 np.histogram(P1-2:CLI/MCP 此前都送不进这个语义)。"""
+    fig, ax = plt.subplots()
+    try:
+        _hist_draw('t', [1, 5, 12, 18, 25], [1, 10, 20], _theme('business'))(ax, 1.0)
+        assert len(ax.patches) == 2  # 3 条边界 → 2 个箱
+    finally:
+        plt.close(fig)
+
+
+def test_waterfall_total_false():
+    """回归:total=False 曾与 total=True 产物逐字节相同(合计柱从不缺席)。"""
+    fig, ax = plt.subplots()
+    try:
+        _waterfall_draw('t', ['A', 'B', 'C'], [100, -40, 50], _theme('business'),
+                        False)(ax, 1.0)
+        rects = sorted(ax.patches, key=lambda r: r.get_x())
+        assert len(rects) == 3                      # 无「合计」柱
+        assert [r.get_height() for r in rects] == pytest.approx([100, 40, 50])
+    finally:
+        plt.close(fig)
+
+
+def test_pie_value_not_duplicated():
+    """回归:饼图数值曾在外标签与扇区内重复出现(图例再列一遍类目)。
+    修复后数值只保留在外标签,<6% 的小扇区也不丢数。"""
+    fig, ax = plt.subplots()
+    try:
+        _pie_like_draw('t', ['A', 'B', '小'], [70, 25, 5],
+                       _theme('business'))(ax, 1.0)
+        assert not [t for t in ax.texts if t.get_text() == '70']  # 扇区内无重复数值
+        assert any('A 70' in t.get_text() for t in ax.texts)      # 数值在外标签
+        assert any('小 5' in t.get_text() for t in ax.texts)      # 小扇区不丢数
+    finally:
+        plt.close(fig)
+
+
+def test_donut_show_values_false():
+    """回归:donut(show_values=False) 曾因解包 ax.pie 的二元返回值直接 ValueError。"""
+    fig, ax = plt.subplots()
+    try:
+        _pie_like_draw('t', ['A', 'B'], [70, 30], _theme('business'),
+                       donut=True, show_values=False)(ax, 1.0)
+        assert not [t for t in ax.texts if '70' in t.get_text()]  # 不标数值
+        assert any(t.get_text() == 'A' for t in ax.texts)         # 只标类目名
     finally:
         plt.close(fig)
 
@@ -321,6 +383,14 @@ def test_theme_metadata():
     packed = [k for members in THEME_PACKS.values() for k in members]
     assert sorted(packed) == sorted(THEMES)
     assert set(THEME_LABELS) == set(THEMES) and set(THEME_DESCS) == set(THEMES)
+
+
+def test_unknown_style_rejected():
+    """回归:库调用传错主题名曾被静默兜底成 business;None / '' 的回退保留。"""
+    with pytest.raises(ValueError, match='未知主题'):
+        _theme('bussiness')
+    assert _theme(None) == _theme('business')
+    assert _theme('') == _theme('business')
 
 
 @pytest.mark.parametrize('fmt', ['pdf', 'tif'])

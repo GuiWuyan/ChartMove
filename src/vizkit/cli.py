@@ -23,34 +23,23 @@ import sys
 from functools import partial
 from pathlib import Path
 
-from .core import (
-    area,
-    bar,
-    bar_multi,
-    box,
-    bubble,
-    combo,
-    donut,
-    dumbbell,
-    funnel,
-    gantt,
-    heatmap,
-    hist,
-    line,
-    line_multi,
-    pie,
-    radar,
-    rose,
-    scatter,
-    themes_preview,
-    treemap,
-    waterfall,
-)
-from .table import file_box_groups, file_columns, file_matrix, file_samples, file_xy
+from ._version import __version__
+from .table import file_box_groups, file_columns, file_matrix, file_samples, file_xy, parse_float
 from .themes import THEME_DESCS, THEME_LABELS, THEME_PACKS, THEMES
 
 _MULTI_TYPES = ('line-multi', 'bar-multi', 'radar')
 _XY_TYPES = ('scatter', 'bubble')
+
+
+def _chart_fn(kind: str):
+    """按类型名取 core 里的绘图函数('line-multi' → 'line_multi',20 个类型全部机械映射)。
+
+    延迟导入 matplotlib:--help / --version / themes 只做纯文本工作,不必为它们
+    付 ~0.7s 的内核启动成本;类型名拼错会推迟到出图时才报,由
+    tests/test_schema_drift.py 守住 CLI / MCP / core 三方一致。
+    """
+    from . import core
+    return getattr(core, kind.replace('-', '_'))
 
 
 # ---------- 入参解析 ----------
@@ -66,7 +55,8 @@ def _load_json(src: str):
 
 
 def _num_list(src) -> list[float]:
-    return [float(v) for v in str(src).replace('，', ',').split(',') if v.strip()]
+    return [parse_float(v, '(逗号分隔列表)')
+            for v in str(src).replace('，', ',').split(',') if v.strip()]
 
 
 def _str_list(src) -> list[str]:
@@ -80,7 +70,7 @@ def _parse_pairs(items: list[str]) -> tuple[list[str], list[float]]:
         if not k or not v:
             raise ValueError(f'数据格式应为 类目=数值,收到: {it!r}')
         cats.append(k)
-        vals.append(float(v))
+        vals.append(parse_float(v, f'(类目「{k}」)'))
     return cats, vals
 
 
@@ -90,7 +80,7 @@ def _norm_series(raw) -> list[tuple[str, list[float]]]:
     out = []
     for item in items:
         nm, vals = item
-        out.append((str(nm), [float(v) for v in vals]))
+        out.append((str(nm), [parse_float(v, f'(系列「{nm}」)') for v in vals]))
     if not out:
         raise ValueError('series 不能为空')
     return out
@@ -102,7 +92,8 @@ def _figsize(text: str | None):
     for sep in ('x', 'X', '*'):
         if sep in text:
             w, _, h = text.partition(sep)
-            return float(w), float(h)
+            return (parse_float(w, '(--figsize 宽度)'),
+                    parse_float(h, '(--figsize 高度)'))
     raise ValueError(f'--figsize 格式应为 宽x高,收到: {text!r}')
 
 
@@ -121,7 +112,8 @@ def _pairs_or_json(args) -> tuple[list[str], list[float]]:
     if args.data:
         d = _load_json(args.data)
         try:
-            return [str(c) for c in d['categories']], [float(v) for v in d['values']]
+            return ([str(c) for c in d['categories']],
+                    [parse_float(v, '(--data values)') for v in d['values']])
         except (KeyError, TypeError) as e:
             raise ValueError('--data JSON 需含 categories 与 values 字段') from e
     if getattr(args, 'items', None):
@@ -159,19 +151,21 @@ def _one_col(cols, t):
 
 # ---------- 各类型的运行逻辑 ----------
 
-def _run_bar(fn, args):
+def _run_bar(kind, args):
+    fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     if args.file:
         cats, cols = _file_cols(args)
         if len(cols) >= 2:  # 多数值列自动升级为分组柱状图
-            return bar_multi(args.title, cats, cols, **kw)
+            return _chart_fn('bar-multi')(args.title, cats, cols, **kw)
         _one_col(cols, 'bar')
         return fn(args.title, cats, cols[0][1], horizontal=args.horizontal, **kw)
     cats, vals = _pairs_or_json(args)
     return fn(args.title, cats, vals, horizontal=args.horizontal, **kw)
 
 
-def _run_line(fn, args):
+def _run_line(kind, args):
+    fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     band = {'lower': _num_list(args.lower) if args.lower else None,
             'upper': _num_list(args.upper) if args.upper else None}
@@ -180,7 +174,8 @@ def _run_line(fn, args):
         if len(cols) >= 2:  # 多数值列自动升级为多系列折线
             if any(band.values()):
                 raise ValueError('区间带 --lower/--upper 仅支持单系列折线')
-            return line_multi(args.title, cats, cols, **_sample_kw(args), **kw)
+            return _chart_fn('line-multi')(args.title, cats, cols,
+                                           **_sample_kw(args), **kw)
         _one_col(cols, 'line')
         return fn(args.title, cats, cols[0][1], name=cols[0][0],
                   **band, **_sample_kw(args), **kw)  # 图例名 = 列表头
@@ -188,7 +183,8 @@ def _run_line(fn, args):
     return fn(args.title, cats, vals, **band, **_sample_kw(args), **kw)
 
 
-def _run_waterfall(fn, args):
+def _run_waterfall(kind, args):
+    fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     if args.file:
         cats, cols = _file_cols(args)
@@ -198,7 +194,8 @@ def _run_waterfall(fn, args):
     return fn(args.title, cats, vals, total=not args.no_total, **kw)
 
 
-def _run_combo(fn, args):
+def _run_combo(kind, args):
+    fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     if args.file:  # 类目列之后的第 1 列柱值、第 2 列折线值
         cats, cols = _file_cols(args, min_cols=2)
@@ -213,7 +210,8 @@ def _run_combo(fn, args):
               line_name=args.line_name, **kw)
 
 
-def _run_multi(fn, args):
+def _run_multi(kind, args):
+    fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     if args.file:
         cats, cols = _file_cols(args)
@@ -224,7 +222,8 @@ def _run_multi(fn, args):
     return fn(args.title, cats, ss, **vkw, **_sample_kw(args), **kw)
 
 
-def _run_box(fn, args):
+def _run_box(kind, args):
+    fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     if args.file:  # 每列一组,首行表头=组名,单元格为原始样本
         return fn(args.title, file_box_groups(args.file, getattr(args, 'sheet', None)), **kw)
@@ -233,7 +232,8 @@ def _run_box(fn, args):
     return fn(args.title, _norm_series(_load_json(args.series)), **kw)
 
 
-def _run_xy(fn, args):
+def _run_xy(kind, args):
+    fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     if args.file:  # 列顺序:x, y(, sizes)(, labels)
         xs, ys, sizes, labels = file_xy(args.file, sizes=args.type == 'bubble',
@@ -257,8 +257,26 @@ def _run_xy(fn, args):
     return fn(args.title, xs, ys, trend=args.trend, labels=labels, **kw)
 
 
-def _run_hist(fn, args):
-    bins = args.bins if args.bins == 'auto' else int(args.bins)
+def _bins(text: str):
+    """--bins:整数 / 'auto' / 逗号分隔的分箱边界(对齐 core.hist 的 bins 语义)。"""
+    if text == 'auto':
+        return 'auto'
+    if ',' in text or '，' in text:
+        edges = _num_list(text)
+        if len(edges) < 2:
+            raise ValueError(f'--bins 分箱边界至少 2 个数,收到 {text!r}')
+        if any(b <= a for a, b in zip(edges, edges[1:])):
+            raise ValueError(f'--bins 分箱边界必须严格递增,收到 {edges}')
+        return edges
+    try:
+        return int(text)
+    except ValueError:
+        raise ValueError(f"--bins 需为整数、'auto' 或逗号分隔边界,收到 {text!r}") from None
+
+
+def _run_hist(kind, args):
+    fn = _chart_fn(kind)
+    bins = _bins(args.bins)
     kw = _common_kwargs(args)
     if args.file:
         return fn(args.title, file_samples(args.file, getattr(args, 'sheet', None)),
@@ -272,7 +290,8 @@ def _run_hist(fn, args):
     return fn(args.title, vals, bins=bins, **kw)
 
 
-def _run_heatmap(fn, args):
+def _run_heatmap(kind, args):
+    fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     if args.file:  # 类目列=行名(默认第 1 列),其余列为矩阵
         rlabels, col_names, matrix = file_matrix(args.file, getattr(args, 'cat_col', None),
@@ -286,7 +305,8 @@ def _run_heatmap(fn, args):
               annotate=not args.no_annotate, **kw)
 
 
-def _run_gantt(fn, args):
+def _run_gantt(kind, args):
+    fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     if args.file:  # 2 个数值列 = 开始、结束
         cats, cols = _file_cols(args, min_cols=2)
@@ -305,7 +325,8 @@ def _run_gantt(fn, args):
     return fn(args.title, cats, starts, ends, **kw)
 
 
-def _run_dumbbell(fn, args):
+def _run_dumbbell(kind, args):
+    fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     slope = getattr(args, 'slope', False)
     if args.file:  # 2 个数值列 = 期初、期末
@@ -318,7 +339,8 @@ def _run_dumbbell(fn, args):
     return fn(args.title, cats, ss, slope=slope, **kw)
 
 
-def _default_run(fn, args):
+def _default_run(kind, args):
+    fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     if args.file:
         cats, cols = _file_cols(args)
@@ -353,6 +375,7 @@ def _themes_cmd(args) -> int:
             print(f'  {key:<11} {THEME_LABELS[key]} —— {THEME_DESCS[key]}')
     print('\n用法:--style <主题名>(默认 business)')
     if getattr(args, 'preview', False):
+        from .core import themes_preview  # 延迟导入:纯文本的 themes 不拉起 matplotlib
         themes_preview(out=getattr(args, 'out', None),
                        out_dir=getattr(args, 'out_dir', None))
     return 0
@@ -363,6 +386,7 @@ def _themes_cmd(args) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog='vizkit', description='中文数据图表生成器(默认输出 ./Results/)')
+    ap.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
     sub = ap.add_subparsers(dest='type', required=True, metavar='类型')
 
     common = argparse.ArgumentParser(add_help=False)
@@ -389,32 +413,33 @@ def _build_parser() -> argparse.ArgumentParser:
     common.add_argument('--sheet', help='--file 的 Excel 工作表(名称或从 1 数的序号,默认第一个)')
 
     sps = {}
-    for name, fn, text, items_help in (
-        ('bar', bar, '柱状图', '数据 类目=数值,如 Q1=120(或 --data JSON)'),
-        ('line', line, '单系列折线', '数据 类目=数值(或 --data JSON)'),
-        ('area', area, '面积图', '数据 类目=数值(或 --data JSON)'),
-        ('pie', pie, '饼图', '数据 类目=数值(或 --data JSON)'),
-        ('donut', donut, '环形图', '数据 类目=数值(或 --data JSON)'),
-        ('rose', rose, '玫瑰图(极坐标柱状)', '数据 类目=数值(或 --data JSON)'),
-        ('treemap', treemap, '矩形树图(构成)', '数据 类目=数值(或 --data JSON)'),
-        ('waterfall', waterfall, '瀑布图(自动补合计柱)', '数据 类目=增减值,如 1月=20'),
-        ('funnel', funnel, '漏斗图(自动标逐级转化率)', '数据 类目=数值'),
-        ('combo', combo, '双轴组合图', '柱值 类目=数值(折线值用 --line)'),
-        ('line-multi', line_multi, '多系列折线', None),
-        ('bar-multi', bar_multi, '多系列分组柱状图', None),
-        ('radar', radar, '雷达图', None),
-        ('box', box, '箱线图', None),
-        ('scatter', scatter, '散点图', None),
-        ('bubble', bubble, '气泡图', None),
-        ('hist', hist, '直方图', '原始样本数值,空格分隔(或 --data JSON)'),
-        ('heatmap', heatmap, '热力图', None),
-        ('gantt', gantt, '甘特图', None),
-        ('dumbbell', dumbbell, '哑铃图/坡度图(--slope)', None),
+    for name, text, items_help in (
+        ('bar', '柱状图', '数据 类目=数值,如 Q1=120(或 --data JSON)'),
+        ('line', '单系列折线', '数据 类目=数值(或 --data JSON)'),
+        ('area', '面积图', '数据 类目=数值(或 --data JSON)'),
+        ('pie', '饼图', '数据 类目=数值(或 --data JSON)'),
+        ('donut', '环形图', '数据 类目=数值(或 --data JSON)'),
+        ('rose', '玫瑰图(极坐标柱状)', '数据 类目=数值(或 --data JSON)'),
+        ('treemap', '矩形树图(构成)', '数据 类目=数值(或 --data JSON)'),
+        ('waterfall', '瀑布图(自动补合计柱)', '数据 类目=增减值,如 1月=20'),
+        ('funnel', '漏斗图(自动标逐级转化率)', '数据 类目=数值'),
+        ('combo', '双轴组合图', '柱值 类目=数值(折线值用 --line)'),
+        ('line-multi', '多系列折线', None),
+        ('bar-multi', '多系列分组柱状图', None),
+        ('radar', '雷达图', None),
+        ('box', '箱线图', None),
+        ('scatter', '散点图', None),
+        ('bubble', '气泡图', None),
+        ('hist', '直方图', '原始样本数值,空格分隔(或 --data JSON)'),
+        ('heatmap', '热力图', None),
+        ('gantt', '甘特图', None),
+        ('dumbbell', '哑铃图/坡度图(--slope)', None),
     ):
         sp = sub.add_parser(name, parents=[common], help=text, description=text)
         if items_help:
             sp.add_argument('items', nargs='*', help=items_help)
-        sp.set_defaults(func=partial(_RUNNERS.get(name, _default_run), fn))
+        # 只把类型名交给 runner,core 函数在出图时才解析(入口保持轻量)
+        sp.set_defaults(func=partial(_RUNNERS.get(name, _default_run), name))
         sps[name] = sp
 
     sps['bar'].add_argument('--horizontal', action='store_true', help='横向条形(排名场景)')
@@ -441,7 +466,8 @@ def _build_parser() -> argparse.ArgumentParser:
         sps[name].add_argument('--labels', help='逐点标注,逗号分隔')
     sps['scatter'].add_argument('--trend', action='store_true', help='叠加线性趋势线')
     sps['bubble'].add_argument('--sizes', help='气泡大小,逗号分隔(面积自动归一)')
-    sps['hist'].add_argument('--bins', default='10', help="分箱数,整数或 'auto'")
+    sps['hist'].add_argument('--bins', default='10',
+                             help="分箱数:整数 / 'auto' / 逗号分隔边界(如 1,10,20)")
     sps['heatmap'].add_argument('--no-annotate', action='store_true', help='不在格子标数值')
     sps['gantt'].add_argument('--categories', help='任务名,逗号分隔(也可 --data / --file)')
     sps['gantt'].add_argument('--starts', help='各任务开始,逗号分隔,如 1,4,12')

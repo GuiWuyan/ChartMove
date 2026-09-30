@@ -25,6 +25,7 @@ classifiers = [
 ]
 dependencies = [
     "matplotlib>=3.8",
+    "numpy>=1.24",
     "pillow>=12.3",
     "mcp>=2.2.0",
     "openpyxl>=3.1",
@@ -35,9 +36,15 @@ dev = ["pytest>=8.0", "pytest-xdist>=3.6", "ruff>=0.6"]
 
 [project.scripts]
 vizkit = "vizkit.cli:main"
+vizkit-mcp = "vizkit.mcp_server:main"
+
+[project.urls]
+Homepage = "https://github.com/GuiWuyan/VizKit"
+Repository = "https://github.com/GuiWuyan/VizKit"
+Issues = "https://github.com/GuiWuyan/VizKit/issues"
 
 [tool.hatch.version]
-path = "src/vizkit/__init__.py"  # 版本单源化:pyproject 动态读 __version__
+path = "src/vizkit/_version.py"  # 版本单源化:叶子模块,import 不触发 matplotlib(P2-1)
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/vizkit"]
