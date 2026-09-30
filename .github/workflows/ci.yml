@@ -39,6 +39,8 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - run: pip install -e ".[dev]"
-      - run: vizkit themes
+      - run: vizkit themes # 控制台脚本入口 smoke(只打印文本,无需中文字体)
+        env:
+          PYTHONIOENCODING: utf-8
       - run: python -c "import vizkit.mcp_server" # MCP 入口可导入
       - run: pytest -q -n auto
