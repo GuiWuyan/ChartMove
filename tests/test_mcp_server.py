@@ -100,6 +100,24 @@ def test_validation_error_chinese(tmp_path):
     assert '长度一致' in result.content[0].text  # 中文报错,提示修数据重试
 
 
+def test_invalid_style_rejected(tmp_path):
+    """回归:拼错的 style 曾被静默当 business 使用,还在返回 JSON 里被确认。"""
+    _, result = _call({'type': 'pie', 'title': 't', 'categories': ['a', 'b'],
+                       'values': [3, 7], 'style': 'bussiness',
+                       'out_dir': str(tmp_path)})
+    assert result.is_error
+    assert '未知主题' in result.content[0].text
+
+
+def test_result_reports_requested_style(tmp_path):
+    """返回 JSON 的 style 必须等于实际生效的主题(曾回显未生效的入参)。"""
+    _, result = _call({'type': 'pie', 'title': 't', 'categories': ['a', 'b'],
+                       'values': [3, 7], 'style': 'mckinsey',
+                       'out_dir': str(tmp_path)})
+    assert not result.is_error
+    assert json.loads(result.content[0].text)['style'] == 'mckinsey'
+
+
 # ---------- file 数据(CSV / Excel 直读,列约定与 CLI --file 对齐) ----------
 
 def _csv(tmp_path, text, name='d.csv'):

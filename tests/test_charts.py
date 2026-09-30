@@ -335,6 +335,14 @@ def test_theme_metadata():
     assert set(THEME_LABELS) == set(THEMES) and set(THEME_DESCS) == set(THEMES)
 
 
+def test_unknown_style_rejected():
+    """回归:库调用传错主题名曾被静默兜底成 business;None / '' 的回退保留。"""
+    with pytest.raises(ValueError, match='未知主题'):
+        _theme('bussiness')
+    assert _theme(None) == _theme('business')
+    assert _theme('') == _theme('business')
+
+
 @pytest.mark.parametrize('fmt', ['pdf', 'tif'])
 def test_static_formats(fmt, tmp_path):
     path, warns = _render(bar, dict(SINGLE), tmp_path, fmt=fmt)

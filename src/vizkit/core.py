@@ -1092,6 +1092,8 @@ def _theme(style: str | None, numfmt: str = 'auto', note: str | None = None) -> 
     """主题 + 全局展示选项:numfmt 数值格式(auto / plain / percent),note 底部脚注。"""
     if numfmt not in ('auto', 'plain', 'percent'):
         raise ValueError(f'numfmt 仅支持 auto / plain / percent,收到 {numfmt!r}')
+    if style and style not in THEMES:  # None / '' 仍回退 business(保持既有调用方兼容)
+        raise ValueError(f'未知主题 {style!r};可选:{", ".join(THEMES)}')
     th = THEMES.get(style or 'business', THEMES['business'])
     return dict(th, palette=list(th['palette']), numfmt=numfmt, note=note)
 

@@ -41,7 +41,7 @@ from .core import (
     waterfall,
 )
 from .table import file_box_groups, file_columns, file_matrix, file_samples, file_xy
-from .themes import THEME_DESCS, THEME_LABELS, THEME_PACKS
+from .themes import THEME_DESCS, THEME_LABELS, THEME_PACKS, THEMES
 
 ChartType = Literal[
     'bar', 'line', 'line-multi', 'area', 'pie', 'donut', 'combo', 'bar-multi',
@@ -172,6 +172,8 @@ def make_chart(
     col: str | None = None,
     sheet: str | None = None,
 ) -> str:
+    if style not in THEMES:  # 入口即校验:错误主题不许静默兜底成 business 再回显假答案
+        raise ToolError(f'未知主题 {style!r};可选:{", ".join(THEMES)}')
     common: dict[str, Any] = dict(style=style, animate=animate, fmt=fmt, loop=loop,
                                   out=out, out_dir=out_dir, numfmt=numfmt, note=note)
     if type in ('line', 'area', 'line-multi'):  # sample 仅折线类支持
