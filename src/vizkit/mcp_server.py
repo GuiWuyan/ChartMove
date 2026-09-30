@@ -1,5 +1,5 @@
 """MCP Server 入口:把 vizkit 暴露给 AI / agent,stdio 传输。
-工具面收敛为 2 个(docs/plan.md 5.3):
+工具面收敛为 2 个:
     make_chart   生成图表,返回 JSON {path(绝对路径), file_size, type, style, animated}
     list_themes  列出 13 主题 × 4 风格包(名称 + 一句话描述)
 约定:工具 schema 描述用英文(LLM 选工具靠它);数据校验错误转 ToolError,消息保持中文;
@@ -11,36 +11,13 @@ import contextlib
 import json
 import sys
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
-from . import __version__
-from .core import (
-    area,
-    bar,
-    bar_multi,
-    box,
-    bubble,
-    combo,
-    donut,
-    dumbbell,
-    funnel,
-    gantt,
-    heatmap,
-    hist,
-    line,
-    line_multi,
-    pie,
-    radar,
-    rose,
-    scatter,
-    themes_preview,
-    treemap,
-    waterfall,
-)
-from .table import file_box_groups, file_columns, file_matrix, file_samples, file_xy
+from ._version import __version__
+from .table import file_box_groups, file_columns, file_matrix, file_samples, file_xy, parse_float
 from .themes import THEME_DESCS, THEME_LABELS, THEME_PACKS, THEMES
 
 ChartType = Literal[
@@ -49,13 +26,16 @@ ChartType = Literal[
     'rose', 'treemap', 'gantt', 'dumbbell']
 Fmt = Literal['png', 'pdf', 'tif', 'gif', 'mp4']
 
-_CHART_FNS = {
-    'bar': bar, 'line': line, 'line-multi': line_multi, 'area': area, 'pie': pie,
-    'donut': donut, 'combo': combo, 'bar-multi': bar_multi, 'radar': radar,
-    'scatter': scatter, 'bubble': bubble, 'hist': hist, 'box': box,
-    'heatmap': heatmap, 'waterfall': waterfall, 'funnel': funnel, 'rose': rose,
-    'treemap': treemap, 'gantt': gantt, 'dumbbell': dumbbell,
-}
+
+def _chart_fn(name: str):
+    """按类型名取 core 里的绘图函数('line-multi' → 'line_multi',20 个类型全部机械映射)。
+
+    延迟导入 matplotlib:MCP 进程启动(握手、工具发现)不必付内核 ~0.7s;
+    类型名拼错会推迟到调用才报,由 tests/test_schema_drift.py 守住三方一致。
+    """
+    from . import core
+    return getattr(core, name.replace('-', '_'))
+
 _PAIR_TYPES = ('bar', 'line', 'area', 'pie', 'donut', 'waterfall', 'funnel', 'rose',
                'treemap')
 _SERIES_TYPES = ('line-multi', 'bar-multi', 'radar')
@@ -86,7 +66,29 @@ def _require(cond, message: str) -> None:
 def _norm_series(series) -> list[tuple[str, list[float]]]:
     """series 规范为 [(名称, 数值列表), ...];接受 [[名, [值..]], ...] 或 {名: [值..]}。"""
     items = series.items() if isinstance(series, dict) else series
-    return [(str(nm), [float(v) for v in vals]) for nm, vals in items]
+    return [(str(nm), [parse_float(v, f'(系列「{nm}」)') for v in vals])
+            for nm, vals in items]
+
+
+def _bins(bins):
+    """bins 规范化:整数 / 'auto' / 严格递增的分箱边界(与 CLI --bins 语义一致)。
+
+    边界的递增校验必须在这里做:np.histogram 遇到乱序边界抛的是英文 ValueError。
+    """
+    if isinstance(bins, str):
+        if bins == 'auto':
+            return 'auto'
+        try:
+            return int(bins)
+        except ValueError:
+            raise ToolError(f"bins 需为整数、'auto' 或边界数组,收到 {bins!r}") from None
+    if isinstance(bins, list):
+        if len(bins) < 2:
+            raise ToolError(f'bins 分箱边界至少 2 个数,收到 {bins!r}')
+        if any(b <= a for a, b in zip(bins, bins[1:])):
+            raise ToolError(f'bins 分箱边界必须严格递增,收到 {bins}')
+        return [parse_float(v) for v in bins]
+    return bins  # int
 
 
 @server.tool(
@@ -105,7 +107,9 @@ def _norm_series(series) -> list[tuple[str, list[float]]]:
         'line accepts lower + upper (same length as values) to draw a '
         'semi-transparent prediction/confidence band; '
         'scatter/bubble: x + y (+sizes for bubble, +labels optional); '
-        'hist: values = raw samples; box: series = [[group_name, [samples]], ...]; '
+        'hist: values = raw samples, bins is an int, "auto", or a strictly '
+        'increasing edge array (e.g. [1,10,20]); '
+        'box: series = [[group_name, [samples]], ...]; '
         'heatmap: rows + cols + matrix (2-D numeric). '
         'file (optional): path to a CSV/Excel file (.csv/.xlsx, first row = header) '
         'to read data from - takes precedence over inline data params. '
@@ -158,7 +162,7 @@ def make_chart(
     horizontal: bool = False,
     trend: bool = False,
     total: bool = True,
-    bins: int | str = 10,
+    bins: int | str | list[float] = 10,
     sample: int | None = None,
     lower: list[float] | None = None,
     upper: list[float] | None = None,
@@ -174,6 +178,7 @@ def make_chart(
 ) -> str:
     if style not in THEMES:  # 入口即校验:错误主题不许静默兜底成 business 再回显假答案
         raise ToolError(f'未知主题 {style!r};可选:{", ".join(THEMES)}')
+    bins = _bins(bins)  # hist 专用:整数 / 'auto' / 严格递增边界(非法给中文错)
     common: dict[str, Any] = dict(style=style, animate=animate, fmt=fmt, loop=loop,
                                   out=out, out_dir=out_dir, numfmt=numfmt, note=note)
     if type in ('line', 'area', 'line-multi'):  # sample 仅折线类支持
@@ -191,53 +196,58 @@ def make_chart(
                 _require(categories is not None and values is not None,
                          'categories 与 values 不能为空')
                 if type == 'bar':
-                    return _result(bar(title, categories, values,
-                                       horizontal=horizontal, **common), type, style,
-                                   animate)
+                    return _result(_chart_fn('bar')(title, categories, values,
+                                                    horizontal=horizontal, **common),
+                                   type, style, animate)
                 if type == 'waterfall':
-                    return _result(waterfall(title, categories, values, total=total,
-                                             **common), type, style, animate)
-                return _result(_CHART_FNS[type](title, categories, values, **common),
+                    return _result(_chart_fn('waterfall')(title, categories, values,
+                                                          total=total, **common),
+                                   type, style, animate)
+                return _result(_chart_fn(type)(title, categories, values, **common),
                                type, style, animate)
             if type == 'combo':
                 _require(categories is not None and values is not None
                          and line_values is not None,
                          'combo 需要 categories、values(柱值)与 line_values(线值)')
-                return _result(combo(title, categories, values, line_values, **common),
+                return _result(_chart_fn('combo')(title, categories, values,
+                                                  line_values, **common),
                                type, style, animate)
             if type in _SERIES_TYPES:
                 _require(categories is not None and series is not None,
                          '多系列图需要 categories 与 series')
-                return _result(_CHART_FNS[type](title, categories,
-                                                _norm_series(series), **common),
+                return _result(_chart_fn(type)(title, categories,
+                                               _norm_series(series), **common),
                                type, style, animate)
             if type == 'box':
                 _require(series is not None,
                          'box 需要 series=[[组名, [样本...]], ...]')
-                return _result(box(title, _norm_series(series), **common),
+                return _result(_chart_fn('box')(title, _norm_series(series), **common),
                                type, style, animate)
             if type in _XY_TYPES:
                 _require(x is not None and y is not None, 'scatter/bubble 需要 x 与 y')
                 if type == 'bubble':
                     _require(sizes is not None, 'bubble 需要 sizes')
-                    return _result(bubble(title, x, y, sizes, labels=labels, **common),
+                    return _result(_chart_fn('bubble')(title, x, y, sizes,
+                                                       labels=labels, **common),
                                    type, style, animate)
-                return _result(scatter(title, x, y, trend=trend, labels=labels,
-                                       **common), type, style, animate)
+                return _result(_chart_fn('scatter')(title, x, y, trend=trend,
+                                                    labels=labels, **common),
+                               type, style, animate)
             if type == 'hist':
                 _require(values is not None, 'hist 需要 values(原始样本)')
-                return _result(hist(title, values, bins=bins, **common),
+                return _result(_chart_fn('hist')(title, values, bins=bins, **common),
                                type, style, animate)
             if type == 'heatmap':
                 _require(rows is not None and cols is not None and matrix is not None,
                          'heatmap 需要 rows、cols 与 matrix')
-                return _result(heatmap(title, rows, cols, matrix, **common),
+                return _result(_chart_fn('heatmap')(title, rows, cols, matrix, **common),
                                type, style, animate)
             if type == 'gantt':
                 _require(categories is not None and starts is not None
                          and ends is not None,
                          'gantt 需要 categories(任务名)、starts 与 ends')
-                return _result(gantt(title, categories, starts, ends, **common),
+                return _result(_chart_fn('gantt')(title, categories, starts, ends,
+                                                  **common),
                                type, style, animate)
             if type == 'dumbbell':
                 _require(categories is not None and series is not None,
@@ -245,9 +255,11 @@ def make_chart(
                 ss = _norm_series(series)
                 _require(len(ss) == 2,
                          f'dumbbell 需要恰好 2 个系列(期初/期末),收到 {len(ss)} 个')
-                return _result(dumbbell(title, categories, ss, slope=slope, **common),
+                return _result(_chart_fn('dumbbell')(title, categories, ss,
+                                                     slope=slope, **common),
                                type, style, animate)
-            raise ToolError(f'未知图表类型 {type!r},可选:{", ".join(_CHART_FNS)}')
+            raise ToolError(f'未知图表类型 {type!r},'
+                            f'可选:{", ".join(get_args(ChartType))}')
     except (ValueError, RuntimeError, OSError) as e:  # 中文校验消息 → ToolError
         raise ToolError(str(e)) from e
 
@@ -264,8 +276,9 @@ def _from_file(type, title, file, cat_col, col, sheet, common, *, horizontal, tr
         _require(cols, 'file 至少需要 1 列数值')
         if len(cols) >= 2:  # 多数值列自动升级为多系列(与 CLI --file 一致)
             if type == 'bar':
-                return done(bar_multi(title, cats, cols, **common), 'bar-multi')
-            # 区间带只对单系列折线有意义:必须摘掉 lower/upper 再调 line_multi,
+                return done(_chart_fn('bar-multi')(title, cats, cols, **common),
+                            'bar-multi')
+            # 区间带只对单系列折线有意义:必须摘掉 lower/upper 再调 line-multi,
             # 否则未知关键字 TypeError 裸穿 except(它不在中文转换的异常元组里)
             if common.get('lower') is not None or common.get('upper') is not None:
                 raise ToolError('区间带 lower/upper 仅支持单系列折线;'
@@ -273,53 +286,64 @@ def _from_file(type, title, file, cat_col, col, sheet, common, *, horizontal, tr
                                 '请用 col 指定其中 1 列')
             multi_common = {k: v for k, v in common.items()
                             if k not in ('lower', 'upper')}
-            return done(line_multi(title, cats, cols, **multi_common), 'line-multi')
+            return done(_chart_fn('line-multi')(title, cats, cols, **multi_common),
+                        'line-multi')
         if type == 'bar':
-            return done(bar(title, cats, cols[0][1], horizontal=horizontal, **common), type)
-        return done(line(title, cats, cols[0][1], name=cols[0][0], **common), type)
+            return done(_chart_fn('bar')(title, cats, cols[0][1],
+                                         horizontal=horizontal, **common), type)
+        return done(_chart_fn('line')(title, cats, cols[0][1], name=cols[0][0],
+                                      **common), type)
     if type in ('area', 'pie', 'donut', 'rose', 'treemap', 'waterfall', 'funnel'):
         cats, cols = file_columns(file, cat_col, col, sheet)
         _require(len(cols) == 1,
                  f'{type} 只支持 1 列数值,file 里有 {len(cols)} 列(可用 col 挑 1 列)')
         if type == 'waterfall':
-            return done(waterfall(title, cats, cols[0][1], total=total, **common), type)
-        return done(_CHART_FNS[type](title, cats, cols[0][1], **common), type)
+            return done(_chart_fn('waterfall')(title, cats, cols[0][1],
+                                               total=total, **common), type)
+        return done(_chart_fn(type)(title, cats, cols[0][1], **common), type)
     if type == 'combo':
         cats, cols = file_columns(file, cat_col, col, sheet)
         _require(len(cols) == 2,
                  f'combo 的 file 需要 2 列数值(第 1 列柱值、第 2 列折线值),'
                  f'收到 {len(cols)} 列')
-        return done(combo(title, cats, cols[0][1], cols[1][1], **common), type)
+        return done(_chart_fn('combo')(title, cats, cols[0][1], cols[1][1], **common),
+                    type)
     if type in _SERIES_TYPES:  # line-multi / bar-multi / radar:各数值列 = 一个系列
         cats, cols = file_columns(file, cat_col, col, sheet)
         _require(cols, 'file 至少需要 1 列数值')
-        return done(_CHART_FNS[type](title, cats, cols, **common), type)
+        return done(_chart_fn(type)(title, cats, cols, **common), type)
     if type == 'box':
-        return done(box(title, file_box_groups(file, sheet), **common), type)
+        return done(_chart_fn('box')(title, file_box_groups(file, sheet), **common),
+                    type)
     if type == 'hist':
-        return done(hist(title, file_samples(file, sheet), bins=bins, **common), type)
+        return done(_chart_fn('hist')(title, file_samples(file, sheet),
+                                      bins=bins, **common), type)
     if type in _XY_TYPES:
         xs, ys, sizes, labels = file_xy(file, sizes=type == 'bubble', sheet=sheet)
         if type == 'bubble':
             _require(sizes, 'bubble 的 file 需要第 3 列气泡大小')
-            return done(bubble(title, xs, ys, sizes, labels=labels, **common), type)
-        return done(scatter(title, xs, ys, trend=trend, labels=labels, **common), type)
+            return done(_chart_fn('bubble')(title, xs, ys, sizes, labels=labels,
+                                            **common), type)
+        return done(_chart_fn('scatter')(title, xs, ys, trend=trend, labels=labels,
+                                         **common), type)
     if type == 'heatmap':
         rlabels, col_names, matrix = file_matrix(file, cat_col, sheet)
-        return done(heatmap(title, rlabels, col_names, matrix, **common), type)
+        return done(_chart_fn('heatmap')(title, rlabels, col_names, matrix, **common),
+                    type)
     if type == 'gantt':  # 2 个数值列 = 开始、结束
         cats, cols = file_columns(file, cat_col, col, sheet)
         _require(len(cols) == 2,
                  f'gantt 的 file 需要 2 列数值(第 1 列开始、第 2 列结束),'
                  f'收到 {len(cols)} 列')
-        return done(gantt(title, cats, cols[0][1], cols[1][1], **common), type)
+        return done(_chart_fn('gantt')(title, cats, cols[0][1], cols[1][1], **common),
+                    type)
     if type == 'dumbbell':  # 2 个数值列 = 期初、期末
         cats, cols = file_columns(file, cat_col, col, sheet)
         _require(len(cols) == 2,
                  f'dumbbell 的 file 需要 2 列数值(期初、期末),收到 {len(cols)} 列')
-        return done(dumbbell(title, cats, [cols[0], cols[1]], slope=slope, **common),
-                    type)
-    raise ToolError(f'未知图表类型 {type!r},可选:{", ".join(_CHART_FNS)}')
+        return done(_chart_fn('dumbbell')(title, cats, [cols[0], cols[1]],
+                                          slope=slope, **common), type)
+    raise ToolError(f'未知图表类型 {type!r},可选:{", ".join(get_args(ChartType))}')
 
 
 def _result(path, chart_type: str, style: str, animated: bool) -> str:
@@ -337,17 +361,20 @@ def _result(path, chart_type: str, style: str, animated: bool) -> str:
         'key (use it as the "style" param of make_chart), Chinese label, '
         'and a one-line description. Default style is "business". '
         'preview=true additionally renders a montage image (every theme drawing '
-        'the same mini bar chart) for visual comparison and returns its path.'
+        'the same mini bar chart) for visual comparison and returns its path; '
+        'out_dir (optional, with preview=true) places that montage image in the '
+        'given directory instead of the default output location.'
     ),
 )
-def list_themes(preview: bool = False) -> str:
+def list_themes(preview: bool = False, out_dir: str | None = None) -> str:
     lines = []
     for pack, members in THEME_PACKS.items():
         lines.append(f'[{pack}]')
         lines += [f'  {k} | {THEME_LABELS[k]} | {THEME_DESCS[k]}' for k in members]
     if preview:
+        from .core import themes_preview  # 延迟导入:纯文本的 list_themes 不拉起 matplotlib
         with contextlib.redirect_stdout(sys.stderr):
-            path = themes_preview()
+            path = themes_preview(out_dir=out_dir)
         lines.append(f'\n主题预览拼版图(每主题同一组迷你柱状图):{path}')
     return '\n'.join(lines)
 

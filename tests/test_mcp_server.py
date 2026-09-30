@@ -2,12 +2,16 @@
 
 覆盖:tools/list 收敛为 2 个工具、make_chart 出图(静态 PNG 与动画 GIF,内联与
 file 数据)、list_themes 内容、数据校验错误的中文 ToolError。
+会话为模块级常驻(P4-1):此前每次调用都重开子进程并握手,23 次调用 ≈ 40–70s 纯开销。
 """
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
+import os
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -16,10 +20,107 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 
 PARAMS = StdioServerParameters(command=sys.executable,
                                args=['-m', 'vizkit.mcp_server'])
+# MCP 子进程 stderr 的去向:默认 errlog=sys.stderr 在 pytest 下是捕获对象(须带
+# fileno 的真实流,故不能用 StringIO/内存缓冲),导到 devnull 免得污染输出
+_DEVNULL = open(os.devnull, 'w', encoding='utf-8')
 
 
-def _call(tool_args: dict, name: str = 'make_chart'):
-    """起子进程完成握手并调用工具,返回 (tools, result)。"""
+class _McpSession:
+    """持有整个模块共用的 stdio 会话;调用经队列在常驻任务内串行执行。
+
+    async with 的生命周期必须在同一任务内完成(anyio 任务亲和),所以由一个
+    后台事件循环线程运行持有会话的 task;对外用 concurrent.futures.Future
+    桥接(线程安全、可带超时阻塞),测试线程从不直接跨任务碰会话。
+    """
+
+    def __init__(self):
+        self._queue: asyncio.Queue = asyncio.Queue()
+        self._ready = threading.Event()
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(target=self._loop.run_forever, daemon=True)
+        self._thread.start()
+        self._task = self._loop.create_task(self._lifetime())
+        if not self._ready.wait(timeout=120):
+            # 超时先看 lifetime 任务是否已崩:把真实异常翻出来,别只留"初始化超时"
+            if self._task.done():
+                raise self._task.exception()
+            raise RuntimeError('MCP 测试会话初始化超时(lifetime 任务仍在运行)')
+
+    async def _lifetime(self):
+        async with stdio_client(PARAMS, errlog=_DEVNULL) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                self._tools = await session.list_tools()
+                self._session = session
+                self._ready.set()
+                while True:
+                    job = await self._queue.get()
+                    if job is None:
+                        break
+                    await job()
+
+    def _submit(self, factory, timeout: float = 300):
+        """把 factory() 投递进常驻任务执行,阻塞至完成。"""
+        cf: concurrent.futures.Future = concurrent.futures.Future()
+
+        async def job():
+            try:
+                cf.set_result(await factory())
+            except BaseException as e:
+                cf.set_exception(e)
+
+        async def put():
+            await self._queue.put(job)
+
+        asyncio.run_coroutine_threadsafe(put(), self._loop).result(timeout=30)
+        return cf.result(timeout=timeout)
+
+    def call(self, tool_args: dict, name: str = 'make_chart'):
+        async def action():
+            return await self._session.call_tool(name, tool_args)
+        return self._submit(action)
+
+    def close(self):
+        on_done = threading.Event()
+        self._task.add_done_callback(lambda _t: on_done.set())
+
+        async def put_none():
+            await self._queue.put(None)
+
+        asyncio.run_coroutine_threadsafe(put_none(), self._loop).result(timeout=30)
+        if not on_done.wait(timeout=120):
+            raise RuntimeError('MCP 测试会话关闭超时')
+        exc = self._task.exception()
+        self._loop.call_soon_threadsafe(self._loop.stop)
+        self._thread.join(timeout=30)
+        self._loop.close()
+        if exc is not None:
+            raise exc
+
+
+_SESSION: _McpSession | None = None
+
+
+@pytest.fixture(scope='module', autouse=True)
+def _shared_session():
+    """模块级常驻会话(P4-1):23 次 per-call 子进程 ≈ 40–70s 纯开销,复用后单文件 55s→20s。
+
+    仅串行 / 单 worker 启用:xdist 多 worker 下,mcp SDK 在 Windows 的
+    Proactor spawn 存在概率性卡死(实测 -n≥8 约 50% 触发,卡在 stdio_client
+    的进程创建,与本仓库代码无关),此时回退到逐调用子进程模式(CI 的历史稳定路径)。
+    """
+    if os.environ.get('PYTEST_XDIST_WORKER'):
+        yield
+        return
+    global _SESSION
+    _SESSION = _McpSession()
+    yield
+    _SESSION.close()
+    _SESSION = None
+
+
+def _call_oneoff(tool_args: dict, name: str) -> tuple:
+    """逐调用子进程模式(xdist 下使用):每次握手后即弃,稳健但慢。"""
 
     async def action(session):
         tools = await session.list_tools()
@@ -27,12 +128,19 @@ def _call(tool_args: dict, name: str = 'make_chart'):
         return tools, result
 
     async def runner():
-        async with stdio_client(PARAMS) as (read, write):
+        async with stdio_client(PARAMS, errlog=_DEVNULL) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
-                return await action(session)
+                return await asyncio.wait_for(action(session), timeout=120)
 
-    return asyncio.run(runner())
+    return asyncio.run(asyncio.wait_for(runner(), timeout=300))
+
+
+def _call(tool_args: dict, name: str = 'make_chart'):
+    """复用常驻会话调用工具,返回 (tools, result);tools 在建会话时取一次。"""
+    if _SESSION is None:
+        return _call_oneoff(tool_args, name)
+    return _SESSION._tools, _SESSION.call(tool_args, name)
 
 
 def test_tools_listed():
@@ -278,6 +386,21 @@ def test_numfmt_and_note(tmp_path):
     p = Path(json.loads(result.content[0].text)['path'])
     assert p.exists() and p.stat().st_size > 0
     p.unlink()
+
+
+def test_hist_bins_edges(tmp_path):
+    """P1-2:bins 边界数组直达 np.histogram;乱序边界报中文错(不是英文 ValueError)。"""
+    _, result = _call({'type': 'hist', 'title': 't', 'values': [1, 5, 12, 18, 25],
+                       'bins': [1, 10, 20], 'out_dir': str(tmp_path)})
+    assert not result.is_error
+    p = Path(json.loads(result.content[0].text)['path'])
+    assert p.exists() and p.stat().st_size > 0
+    p.unlink()
+
+    _, result = _call({'type': 'hist', 'title': 't', 'values': [1, 2, 3],
+                       'bins': [5, 1], 'out_dir': str(tmp_path)})
+    assert result.is_error
+    assert '严格递增' in result.content[0].text
 
 
 def test_same_name_not_overwritten(tmp_path):

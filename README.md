@@ -1,6 +1,6 @@
 # VizKit(vizkit)
 
-**数据图表生成器** 
+**数据图表生成工具** 
 matplotlib 内核,20 种图表 × 13 主题(4 风格包),输出 PNG / PDF / TIF / GIF / MP4;入口为 CLI 与 MCP Server(AI / agent 调用)
 
 ## 目录结构
@@ -54,7 +54,7 @@ matplotlib 内核,20 种图表 × 13 主题(4 风格包),输出 PNG / PDF / TIF 
 | `gantt` | `--categories` 任务名、`--starts` / `--ends` 起止(逗号分隔;或 `--file` 取 2 个数值列=开始/结束) |
 | `dumbbell` | `--slope` 出坡度图、`--series` 恰好 2 个系列=期初/期末(或 `--file` 取 2 个数值列) |
 | `scatter` / `bubble` | `--x` `--y` 数值列表(逗号分隔)、`--trend` 趋势线、`--labels` 逐点标注、bubble 加 `--sizes` 气泡大小 |
-| `hist` | `--bins` 分箱数(整数或 `auto`) |
+| `hist` | `--bins` 分箱:整数 / `auto` / 逗号分隔边界(如 `1,10,20`) |
 | `waterfall` | `--no-total` 不追加合计柱 |
 | `heatmap` | `--no-annotate` 不在格子标数值 |
 
@@ -71,12 +71,44 @@ vizkit themes --preview                        # 另出主题预览拼版图(PNG
 
 ## MCP Server(AI / agent 接入)
 
-stdio 传输,工具面收敛为 2 个;工具描述为英文(LLM 选工具靠它),数据校验错误以中文 `ToolError` 返回:
+stdio 传输,工具面收敛为 2 个;工具描述为英文(LLM 选工具靠它),数据校验错误以中文 `ToolError` 返回。
+
+### 启动
+
+```bash
+vizkit-mcp                   # pip install 后可直接用(见 pyproject [project.scripts])
+python -m vizkit.mcp_server  # 或不经控制台脚本
+```
+
+MCP host(Claude Desktop / ZCode 等)的 `mcpServers` 配置:
+
+```json
+{
+  "mcpServers": {
+    "vizkit": { "command": "vizkit-mcp", "args": [] }
+  }
+}
+```
+
+host 常不继承 shell 的 PATH(Windows 尤其),解析不到虚拟环境里的脚本时用绝对路径:
+
+```json
+{
+  "mcpServers": {
+    "vizkit": {
+      "command": "D:/path/to/VizKit/.venv/Scripts/python.exe",
+      "args": ["-m", "vizkit.mcp_server"]
+    }
+  }
+}
+```
+
+> MCP 的 stdout 是 JSON-RPC 独占通道,内核提示信息已由服务端重定向到 stderr;不要在启动命令上追加 `2>&1` 之类的重定向,会污染协议流。
 
 | 工具 | 参数 | 返回 |
 |---|---|---|
-| `make_chart` | `type`(20 种枚举)、`title`、`categories` / `values`(单系列)、`series`(多系列;gantt 用 `starts` / `ends`,dumbbell 恰好 2 个系列)、`x` / `y` / `sizes`(散点 / 气泡)、`rows` / `cols` / `matrix`(热力图)、`lower` / `upper`(折线区间带)、`style`(默认 business)、`animate`(默认 false,出 GIF)、`loop`(默认 false,GIF 无限循环;仅 GIF 生效)、`sample`(默认 null,仅折线类,LTTB 降采样目标点数)、`numfmt`(auto / plain / percent,默认 auto 万/亿)、`note`(底部脚注)、`fmt`(png/pdf/tif/gif/mp4)、`out` / `out_dir`、`file` / `cat_col` / `col` / `sheet`(CSV / Excel 直读,见下) | JSON:`{path(绝对路径,即交付物), file_size, type, style, animated}` |
-| `list_themes` | `preview`(可选,生成主题预览拼版图) | 13 主题 × 4 风格包:名称 + 中文标签 + 一句话描述;`preview=true` 时附拼版图路径 |
+| `make_chart` | `type`(20 种枚举)、`title`、`categories` / `values`(单系列)、`series`(多系列;gantt 用 `starts` / `ends`,dumbbell 恰好 2 个系列)、`x` / `y` / `sizes`(散点 / 气泡)、`rows` / `cols` / `matrix`(热力图)、`lower` / `upper`(折线区间带)、`line_values`(combo 折线值)、`horizontal`(bar 横向)、`trend`(散点趋势线)、`labels`(散点 / 气泡逐点标注)、`total`(waterfall 合计柱,默认 true)、`bins`(hist:整数 / 'auto' / 严格递增边界数组)、`slope`(dumbbell 坡度图)、`style`(默认 business)、`animate`(默认 false,出 GIF)、`loop`(默认 false,GIF 无限循环;仅 GIF 生效)、`sample`(默认 null,仅折线类,LTTB 降采样目标点数)、`numfmt`(auto / plain / percent,默认 auto 万/亿)、`note`(底部脚注)、`fmt`(png/pdf/tif/gif/mp4)、`out` / `out_dir`、`file` / `cat_col` / `col` / `sheet`(CSV / Excel 直读,见下) | JSON:`{path(绝对路径,即交付物), file_size, type, style, animated}` |
+| `list_themes` | `preview`(可选,生成主题预览拼版图)、`out_dir`(可选,指定拼版图输出目录) | 13 主题 × 4 风格包:名称 + 中文标签 + 一句话描述;`preview=true` 时附拼版图路径 |
 
 **`file` 数据**:agent 手头有 CSV / Excel 时传 `file` 路径即可,优先于内联数据,不必把整表内联进参数;`cat_col` / `col` 选类目列 / 挑 1 个数值列(表头名或从 1 数的序号),`sheet` 选 Excel 工作表。列约定与 CLI `--file` 相同(见上文):bar / line 多数值列自动升级多系列(返回 `type` 如实报告),combo 取两列(柱、线),box 每列一组,scatter/bubble 按 x, y(, sizes)(, labels) 取列,hist 第 1 列为样本,heatmap 第 1 列为行名。
 
@@ -107,6 +139,9 @@ CI:push / PR 自动跑 ruff lint + pytest smoke test,见 `.github/workflows/ci.y
 - 柱类 / 饼类图 values 需 >=0,负值直接报中文错误(bar 会提示改用 waterfall;瀑布图 / 直方图 / 折线类不受限);nan / inf 同样报错
 - 大数据:类目 >25 刻度自动抽稀、折线标记超 50 个隔点绘制;`line` / `area` / `line-multi` 支持 `--sample` / `sample=` LTTB 保形降采样(数千行 CSV 出图)
 - 输出目录:默认项目内 `./Results/`(持久,不做 TTL 清理;同名文件自动加序号 `_2`/`_3`,不覆盖已有产物);优先级 `out_dir=` / `--out-dir` 参数 > 环境变量 `VIZKIT_OUT_DIR` > 默认
-- 表格直读:CLI `--file` 支持 CSV(UTF-8 / GBK)与 Excel(.xlsx),`--sheet` / `sheet=` 选 Excel 工作表(名称或从 1 数的序号),见 table.py
+- 表格直读:CLI `--file` 支持 CSV(UTF-8 / GBK)与 Excel(.xlsx / .xlsm),`--sheet` / `sheet=` 选 Excel 工作表(名称或从 1 数的序号),见 table.py
 
 依赖:matplotlib、mcp(官方 SDK,2.x 起 API 为 `MCPServer`)、pillow、openpyxl(Excel 读取).
+
+## LICENSE
+Apache 2.0

@@ -13,7 +13,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install ruff
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e ".[dev]" # ruff 版本随 [dev] extra 锁定,新规则不会让 lint 意外变红
       - run: ruff check src tests examples
 
   test:
@@ -22,7 +24,13 @@ jobs:
       matrix:
         os: [windows-latest, ubuntu-latest]
         python-version: ["3.10", "3.13"]
+        include:
+          - os: ubuntu-latest
+            python-version: "3.11"
+          - os: ubuntu-latest
+            python-version: "3.12"
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30 # 渲染型用例挂了不会一直占 runner
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -31,4 +39,6 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - run: pip install -e ".[dev]"
+      - run: vizkit themes
+      - run: python -c "import vizkit.mcp_server" # MCP 入口可导入
       - run: pytest -q -n auto

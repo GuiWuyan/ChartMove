@@ -1,8 +1,8 @@
-"""冒烟测试:20 种图表类型 × PNG / GIF / MP4 全过。
+"""冒烟测试:20 种图表类型 × 静态 PNG 全量;动画按实现抽样 4 代表型 × GIF / MP4。
 
-矩阵内 line 自带区间带、dumbbell 为坡度图(slope=True),动画分支一并覆盖。
-另覆盖:pdf / tif 静态格式、13 主题、横向条形、figsize / dpi 参数、
-中文缺字检测与校验错误。产物写入 pytest 临时目录,断言后即删。
+矩阵内 line 自带区间带、dumbbell 为坡度图(slope=True);另覆盖:pdf / tif 静态格式、
+13 主题、横向条形、figsize / dpi 参数、中文缺字检测与校验错误。
+产物写入 pytest 临时目录,断言后即删。
 """
 from __future__ import annotations
 
@@ -121,14 +121,27 @@ def _assert_ok(path: Path, ext: str, warns: list[str]) -> None:
     path.unlink()  # 即测即删
 
 
-@pytest.mark.parametrize('fmt', ['png', 'gif', 'mp4'])
+ANIM_SAMPLE = ('bar', 'line', 'line_multi', 'heatmap')
+"""动画矩阵抽样(P4-2):20 类 × 2 动画曾是 CI 时长大头,按动画实现取代表——
+bar=逐根升起、line=渐进折线(含区间带逐帧展开)、line_multi=多系列渐进、heatmap=逐格淡入。"""
+
+
 @pytest.mark.parametrize('name', list(CASES))
-def test_matrix(name, fmt, tmp_path):
-    """验收主体:20 种类型 × 3 种输出。"""
+def test_matrix_static(name, tmp_path):
+    """验收主体:20 种类型 × 静态 PNG 全量(覆盖所有绘制分支,~0.1s/张)。"""
+    fn, kw = CASES[name]
+    path, warns = _render(fn, kw, tmp_path, fmt='png')
+    _assert_ok(path, 'png', warns)
+
+
+@pytest.mark.parametrize('fmt', ['gif', 'mp4'])
+@pytest.mark.parametrize('name', ANIM_SAMPLE)
+def test_matrix_animated(name, fmt, tmp_path):
+    """动画矩阵:抽样 4 个代表类型 × GIF / MP4,覆盖三种动画实现。"""
     if fmt == 'mp4' and not HAS_FFMPEG:
         pytest.skip('未安装 ffmpeg,跳过 MP4')
     fn, kw = CASES[name]
-    path, warns = _render(fn, kw, tmp_path, animate=fmt in ('gif', 'mp4'), fmt=fmt)
+    path, warns = _render(fn, kw, tmp_path, animate=True, fmt=fmt)
     _assert_ok(path, fmt, warns)
 
 
@@ -310,6 +323,16 @@ def test_waterfall_geometry():
         rects = sorted(ax.patches, key=lambda r: r.get_x())
         assert [(r.get_y(), r.get_height()) for r in rects] == pytest.approx(
             [(0, 100), (60, 40), (60, 50), (0, 110)])
+    finally:
+        plt.close(fig)
+
+
+def test_hist_bins_edges_array():
+    """bins 边界数组直通 np.histogram(P1-2:CLI/MCP 此前都送不进这个语义)。"""
+    fig, ax = plt.subplots()
+    try:
+        _hist_draw('t', [1, 5, 12, 18, 25], [1, 10, 20], _theme('business'))(ax, 1.0)
+        assert len(ax.patches) == 2  # 3 条边界 → 2 个箱
     finally:
         plt.close(fig)
 

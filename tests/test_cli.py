@@ -83,14 +83,15 @@ def test_line_band_flag(tmp_path):
 
 def test_line_band_args_reach_core(tmp_path, monkeypatch):
     """回归:--lower/--upper 必须透传给 core.line(曾止步 argparse,区间带静默丢失)。"""
+    from vizkit import core
     got = {}
-    real = cli.line
+    real = core.line
 
     def spy(title, cats, vals, **kw):
         got.update(kw)
         return real(title, cats, vals, **kw)
 
-    monkeypatch.setattr(cli, 'line', spy)
+    monkeypatch.setattr(core, 'line', spy)  # runner 出图时经 _chart_fn 读 core 属性
     assert cli.main(['line', '预测', '1月=120', '2月=135', '3月=128',
                      '--lower', '112,125,116', '--upper', '128,145,140',
                      '--out-dir', str(tmp_path)]) == 0
@@ -109,14 +110,15 @@ def test_line_band_rejected_for_multi_series_file(tmp_path):
 
 def test_waterfall_no_total_reaches_core(tmp_path, monkeypatch):
     """回归:--no-total 曾是空参数(total=False 与 True 产物逐字节相同)。"""
+    from vizkit import core
     got = {}
-    real = cli.waterfall
+    real = core.waterfall
 
     def spy(title, cats, vals, **kw):
         got.update(kw)
         return real(title, cats, vals, **kw)
 
-    monkeypatch.setattr(cli, 'waterfall', spy)
+    monkeypatch.setattr(core, 'waterfall', spy)
     assert cli.main(['waterfall', 't', 'a=10', 'b=-4', 'c=6', '--no-total',
                      '--out-dir', str(tmp_path)]) == 0
     assert got['total'] is False
@@ -147,6 +149,45 @@ def test_themes_preview(tmp_path):
 def test_bad_pairs_exit_1(tmp_path, capsys):
     assert cli.main(['bar', 't', 'bad-data', '--out-dir', str(tmp_path)]) == 1
     assert '类目=数值' in capsys.readouterr().err
+
+
+def test_bad_number_error_is_chinese(tmp_path, capsys):
+    """P1-1 回归:数值解析失败曾把英文原味异常(could not convert ...)拼进错误消息。"""
+    assert cli.main(['bar', 't', 'Q1=abc', '--out-dir', str(tmp_path)]) == 1
+    err = capsys.readouterr().err
+    assert 'could not convert' not in err and '需要数值' in err
+
+    assert cli.main(['scatter', 't', '--x', '1,2,zz', '--y', '1,2,3',
+                     '--out-dir', str(tmp_path)]) == 1
+    err = capsys.readouterr().err
+    assert 'could not convert' not in err and '需要数值' in err
+
+    assert cli.main(['bar', 't', '--data', '{"categories":["a"],"values":["x"]}',
+                     '--out-dir', str(tmp_path)]) == 1
+    err = capsys.readouterr().err
+    assert 'could not convert' not in err and '需要数值' in err
+
+    assert cli.main(['line-multi', 't', '--categories', 'a,b', '--series',
+                     '[["s", [1, "x"]]]', '--out-dir', str(tmp_path)]) == 1
+    err = capsys.readouterr().err
+    assert 'could not convert' not in err and '系列「s」' in err
+
+    assert cli.main(['line', 't', 'a=1', '--figsize', '宽x高',
+                     '--out-dir', str(tmp_path)]) == 1
+    err = capsys.readouterr().err
+    assert 'could not convert' not in err and '需要数值' in err
+
+
+def test_hist_bins_edges(tmp_path, capsys):
+    """P1-2 回归:--bins 边界数组曾送不进内核(int() 直接英文错);补齐后三类入参都可达。"""
+    _run(tmp_path, 'hist', '分布', '1', '5', '12', '18', '25', '--bins', '1,10,20')
+    _expect_file(tmp_path, 'hist_分布.png')
+    assert cli.main(['hist', 't', '1', '2', '3', '--bins', '5,1',
+                     '--out-dir', str(tmp_path)]) == 1
+    assert '严格递增' in capsys.readouterr().err
+    assert cli.main(['hist', 't', '1', '2', '3', '--bins', 'x',
+                     '--out-dir', str(tmp_path)]) == 1
+    assert '需为整数' in capsys.readouterr().err
 
 
 def test_funnel_negative_exit_1(tmp_path, capsys):

@@ -1,6 +1,6 @@
 """输出目录解析与文件命名。
 
-约定(docs/plan.md 第 4 节):输出目录持久化,绝不做 TTL 清理。
+输出目录持久化,绝不做 TTL 清理。
 优先级:显式 out_dir 参数 > 环境变量 VIZKIT_OUT_DIR > 默认 ./Results/(相对当前
 工作目录,项目内持久;桌宠等 CWD 不可预期的场景请设 VIZKIT_OUT_DIR)。
 """

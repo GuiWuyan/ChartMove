@@ -9,6 +9,7 @@ from vizkit.table import (
     file_matrix,
     file_samples,
     file_xy,
+    parse_float,
     read_table,
     to_float,
 )
@@ -83,6 +84,16 @@ def test_to_float_tolerant():
     assert to_float(' 3.5 ') == 3.5
     with pytest.raises(ValueError, match='非数值单元格'):
         to_float('abc', '(列「销售额」)')
+
+
+def test_parse_float():
+    """P1-1:内联标量统一中文报错,附 where 位置;千分位与空白容忍与 to_float 一致。"""
+    assert parse_float('1,200') == 1200.0
+    assert parse_float(' 3.5 ') == 3.5
+    with pytest.raises(ValueError, match='需要数值'):
+        parse_float('abc')
+    with pytest.raises(ValueError, match='需要数值.*类目「Q1」'):
+        parse_float('abc', '(类目「Q1」)')
 
 
 # ---------- 各图表取数函数(CLI --file 与 MCP file 共用) ----------
