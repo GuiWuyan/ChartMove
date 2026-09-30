@@ -47,7 +47,7 @@ def setup_fonts() -> str | None:
     if FAMILY is not None:
         rcParams['font.sans-serif'] = [FAMILY, 'DejaVu Sans']
     else:
-        print('vizkit: 未找到中文字体,中文可能显示为方框;'
+        print('chartmove: 未找到中文字体,中文可能显示为方框;'
               '请安装 微软雅黑(Windows)/ PingFang(macOS)/ Noto Sans CJK(Linux)',
               file=sys.stderr)
     rcParams['axes.unicode_minus'] = False   # 坐标轴负号

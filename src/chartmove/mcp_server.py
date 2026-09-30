@@ -1,4 +1,4 @@
-"""MCP Server 入口:把 vizkit 暴露给 AI / agent,stdio 传输。
+"""MCP Server 入口:把 chartmove 暴露给 AI / agent,stdio 传输。
 工具面收敛为 2 个:
     make_chart   生成图表,返回 JSON {path(绝对路径), file_size, type, style, animated}
     list_themes  列出 13 主题 × 4 风格包(名称 + 一句话描述)
@@ -42,7 +42,7 @@ _SERIES_TYPES = ('line-multi', 'bar-multi', 'radar')
 _XY_TYPES = ('scatter', 'bubble')
 
 server = MCPServer(
-    name='vizkit',
+    name='chartmove',
     version=__version__,
     instructions=(
         'Chinese chart generator: 20 chart types x 13 themes, no font configuration '

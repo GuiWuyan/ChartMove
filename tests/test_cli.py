@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from vizkit import cli
+from chartmove import cli
 
 PAIRS = ['a=10', 'b=20', 'c=15']
 
@@ -83,7 +83,7 @@ def test_line_band_flag(tmp_path):
 
 def test_line_band_args_reach_core(tmp_path, monkeypatch):
     """回归:--lower/--upper 必须透传给 core.line(曾止步 argparse,区间带静默丢失)。"""
-    from vizkit import core
+    from chartmove import core
     got = {}
     real = core.line
 
@@ -110,7 +110,7 @@ def test_line_band_rejected_for_multi_series_file(tmp_path):
 
 def test_waterfall_no_total_reaches_core(tmp_path, monkeypatch):
     """回归:--no-total 曾是空参数(total=False 与 True 产物逐字节相同)。"""
-    from vizkit import core
+    from chartmove import core
     got = {}
     real = core.waterfall
 

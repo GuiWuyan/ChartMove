@@ -3,9 +3,9 @@
 13 主题 × 4 风格包(学术 / 商务 / 简约演示 / 其他),定义与元数据见 themes.py;
 扩展新主题只需在 THEMES 加一组参数,绘图代码零改动。
 
-    from vizkit import bar, line, pie, donut, area, combo, line_multi, bar_multi, radar
+    from chartmove import bar, line, pie, donut, area, combo, line_multi, bar_multi, radar
     bar('季度产量', ['Q1', 'Q2', 'Q3'], [120, 200, 90], style='mckinsey', animate=True)
-    # -> .../VizKit/bar_季度产量.gif
+    # -> .../Chartmove/bar_季度产量.gif
 
 约定:animate=True 出 GIF(默认)/ MP4,静态图 fmt='png'(默认)/'pdf'/'tif';
 GIF 默认播一遍停在末帧,loop=True 无限循环(MP4 是否循环由播放器决定);
@@ -617,7 +617,7 @@ def _box_draw(title, series, th):
 
 def _heatmap_draw(title, rows, cols, arr, th, annotate=True):
     cmap = LinearSegmentedColormap.from_list(
-        'vizkit_seq', [th['face'], th['palette'][0], th['hi_max']])
+        'chartmove_seq', [th['face'], th['palette'][0], th['hi_max']])
     vmin, vmax = float(arr.min()), float(arr.max())
     if vmax <= vmin:
         vmax = vmin + 1.0

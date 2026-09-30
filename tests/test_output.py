@@ -1,28 +1,28 @@
-"""output.py 单测:目录优先级(out_dir > VIZKIT_OUT_DIR > ~/VizKit)、文件名清洗与同名不覆盖。"""
+"""output.py 单测:目录优先级(out_dir > CHARTMOVE_OUT_DIR > ~/Chartmove)、文件名清洗与同名不覆盖。"""
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from vizkit.output import claim_path, next_path, resolve_out_dir, safe_stem
+from chartmove.output import claim_path, next_path, resolve_out_dir, safe_stem
 
 
 def test_priority_explicit_over_env(tmp_path, monkeypatch):
-    monkeypatch.setenv('VIZKIT_OUT_DIR', str(tmp_path / 'env'))
+    monkeypatch.setenv('CHARTMOVE_OUT_DIR', str(tmp_path / 'env'))
     explicit = tmp_path / 'explicit'
     assert resolve_out_dir(explicit) == explicit.resolve()
     assert explicit.is_dir()
 
 
 def test_priority_env_over_default(tmp_path, monkeypatch):
-    monkeypatch.setenv('VIZKIT_OUT_DIR', str(tmp_path / 'env'))
+    monkeypatch.setenv('CHARTMOVE_OUT_DIR', str(tmp_path / 'env'))
     monkeypatch.setattr('pathlib.Path.home', lambda: tmp_path)
     assert resolve_out_dir() == (tmp_path / 'env').resolve()
 
 
 def test_default_results_dir(tmp_path, monkeypatch):
-    monkeypatch.delenv('VIZKIT_OUT_DIR', raising=False)
+    monkeypatch.delenv('CHARTMOVE_OUT_DIR', raising=False)
     monkeypatch.chdir(tmp_path)  # 默认 ./Results/,相对当前工作目录
     assert resolve_out_dir() == (tmp_path / 'Results').resolve()
     assert (tmp_path / 'Results').is_dir()

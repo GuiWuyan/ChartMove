@@ -14,22 +14,22 @@ def _run(argv):
 
 
 def test_cli_themes_via_module():
-    """`python -m vizkit.cli themes` 只打印静态数据,应快且无需中文字体。"""
-    out = _run([sys.executable, '-m', 'vizkit.cli', 'themes'])
+    """`python -m chartmove.cli themes` 只打印静态数据,应快且无需中文字体。"""
+    out = _run([sys.executable, '-m', 'chartmove.cli', 'themes'])
     assert out.returncode == 0
     assert '学术包' in out.stdout and 'business' in out.stdout
 
 
 def test_cli_version_flag():
     """P1-3 回归:--version 此前不存在,argparse 报「缺少 类型」。"""
-    out = _run([sys.executable, '-m', 'vizkit.cli', '--version'])
+    out = _run([sys.executable, '-m', 'chartmove.cli', '--version'])
     assert out.returncode == 0
-    assert 'vizkit' in out.stdout
+    assert 'chartmove' in out.stdout
 
 
 def test_cli_entry_point_installed():
     """控制台脚本入口(此前从未被任何测试调用过)。"""
-    exe = shutil.which('vizkit')
+    exe = shutil.which('chartmove')
     if not exe:
         import pytest
         pytest.skip('未安装 console script')
@@ -38,6 +38,6 @@ def test_cli_entry_point_installed():
 
 
 def test_mcp_server_importable():
-    """MCP 入口可导入(登记在 pyproject 的 vizkit-mcp 指向它)。"""
-    out = _run([sys.executable, '-c', 'import vizkit.mcp_server'])
+    """MCP 入口可导入(登记在 pyproject 的 chartmove-mcp 指向它)。"""
+    out = _run([sys.executable, '-c', 'import chartmove.mcp_server'])
     assert out.returncode == 0
