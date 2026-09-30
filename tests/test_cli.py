@@ -107,6 +107,22 @@ def test_line_band_rejected_for_multi_series_file(tmp_path):
                      '--out-dir', str(tmp_path)]) == 1
 
 
+def test_waterfall_no_total_reaches_core(tmp_path, monkeypatch):
+    """回归:--no-total 曾是空参数(total=False 与 True 产物逐字节相同)。"""
+    got = {}
+    real = cli.waterfall
+
+    def spy(title, cats, vals, **kw):
+        got.update(kw)
+        return real(title, cats, vals, **kw)
+
+    monkeypatch.setattr(cli, 'waterfall', spy)
+    assert cli.main(['waterfall', 't', 'a=10', 'b=-4', 'c=6', '--no-total',
+                     '--out-dir', str(tmp_path)]) == 0
+    assert got['total'] is False
+    (tmp_path / 'waterfall_t.png').unlink()
+
+
 def test_gantt_dumbbell_file(tmp_path):
     """--file 的 2 个数值列:甘特图 = 开始/结束,哑铃图 = 期初/期末。"""
     g = _csv(tmp_path, 'g.csv', '任务,开始,结束\n需求,1,5\n开发,4,11\n')

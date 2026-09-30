@@ -670,12 +670,13 @@ def _heatmap_draw(title, rows, cols, arr, th, annotate=True):
     return draw
 
 
-def _waterfall_draw(title, cats, vals, th):
+def _waterfall_draw(title, cats, vals, th, total=True):
     bars, acc = [], 0.0  # (label, value 或 None=合计, 起点)
     for c, v in zip(cats, vals):
         bars.append((c, v, acc))
         acc += v
-    bars.append(('合计', None, acc))
+    if total:
+        bars.append(('合计', None, acc))
 
     def draw(ax, p):
         _style(ax, title, th)
@@ -1334,8 +1335,7 @@ def waterfall(title: str, categories, values, *, total=True, style='business',
     cats, vals = _validate(categories, values)
     th = _theme(style, numfmt, note)
     return _render('waterfall', title,
-                   _waterfall_draw(title, cats, list(vals) + [None] if total else list(vals),
-                                   th),
+                   _waterfall_draw(title, cats, vals, th, total),
                    animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)
 

@@ -219,7 +219,7 @@ def _stability_draws() -> dict:
         'bubble': lambda: _bubble_draw('t', xs, ys, [10, 40, 5, 25, 35, 15], th),
         'hist': lambda: _hist_draw('t', [68, 72, 70, 75, 77, 80, 82, 85], 8, th),
         'box': lambda: _box_draw('t', [('组A', [3, 5, 4, 6, 7]), ('组B', [8, 9, 7])], th),
-        'waterfall': lambda: _waterfall_draw('t', cats, vals + [None], th),
+        'waterfall': lambda: _waterfall_draw('t', cats, vals, th),
         'funnel': lambda: _funnel_draw('t', ['访问', '加购'], [1000, 420], th),
     }
 
@@ -304,12 +304,24 @@ def test_waterfall_geometry():
     """瀑布图几何:正值柱从上一累计水平升起,负值柱向下悬挂,合计柱从 0 画到代数和(回归)。"""
     fig, ax = plt.subplots()
     try:
-        draw = _waterfall_draw('t', ['A', 'B', 'C'], [100, -40, 50, None],
-                               _theme('business'))
+        draw = _waterfall_draw('t', ['A', 'B', 'C'], [100, -40, 50], _theme('business'))
         draw(ax, 1.0)  # 终态:p=1 时每个元素的错峰进度均为 1
         rects = sorted(ax.patches, key=lambda r: r.get_x())
         assert [(r.get_y(), r.get_height()) for r in rects] == pytest.approx(
             [(0, 100), (60, 40), (60, 50), (0, 110)])
+    finally:
+        plt.close(fig)
+
+
+def test_waterfall_total_false():
+    """回归:total=False 曾与 total=True 产物逐字节相同(合计柱从不缺席)。"""
+    fig, ax = plt.subplots()
+    try:
+        _waterfall_draw('t', ['A', 'B', 'C'], [100, -40, 50], _theme('business'),
+                        False)(ax, 1.0)
+        rects = sorted(ax.patches, key=lambda r: r.get_x())
+        assert len(rects) == 3                      # 无「合计」柱
+        assert [r.get_height() for r in rects] == pytest.approx([100, 40, 50])
     finally:
         plt.close(fig)
 
