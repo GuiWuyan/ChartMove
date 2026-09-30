@@ -43,4 +43,6 @@ jobs:
         env:
           PYTHONIOENCODING: utf-8
       - run: python -c "import vizkit.mcp_server" # MCP 入口可导入
-      - run: pytest -q -n auto
+      # loadgroup:MCP 模块(xdist_group 标记)固定到同一 worker 串行跑,
+      # 共享会话只建一次;其余测试照常按负载并行
+      - run: pytest -q -n auto --dist loadgroup

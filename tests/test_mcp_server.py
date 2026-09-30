@@ -3,6 +3,9 @@
 覆盖:tools/list 收敛为 2 个工具、make_chart 出图(静态 PNG 与动画 GIF,内联与
 file 数据)、list_themes 内容、数据校验错误的中文 ToolError。
 会话为模块级常驻(P4-1):此前每次调用都重开子进程并握手,23 次调用 ≈ 40–70s 纯开销。
+xdist_group 标记 + CI 的 --dist loadgroup 把本模块固定到同一 worker 串行执行:
+Windows 的 Proactor spawn 在多 worker 并发建会话时有概率性卡死(第三方问题),
+单 worker 建会话等价于已验证稳定的串行条件,共享会话因此可以全程启用。
 """
 from __future__ import annotations
 
@@ -17,6 +20,8 @@ from pathlib import Path
 import pytest
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
+
+pytestmark = pytest.mark.xdist_group('mcp')
 
 PARAMS = StdioServerParameters(command=sys.executable,
                                args=['-m', 'vizkit.mcp_server'])
@@ -33,14 +38,14 @@ class _McpSession:
     桥接(线程安全、可带超时阻塞),测试线程从不直接跨任务碰会话。
     """
 
-    def __init__(self):
+    def __init__(self, timeout: float = 60):
         self._queue: asyncio.Queue = asyncio.Queue()
         self._ready = threading.Event()
         self._loop = asyncio.new_event_loop()
         self._thread = threading.Thread(target=self._loop.run_forever, daemon=True)
         self._thread.start()
         self._task = self._loop.create_task(self._lifetime())
-        if not self._ready.wait(timeout=120):
+        if not self._ready.wait(timeout=timeout):
             # 超时先看 lifetime 任务是否已崩:把真实异常翻出来,别只留"初始化超时"
             if self._task.done():
                 raise self._task.exception()
@@ -103,24 +108,29 @@ _SESSION: _McpSession | None = None
 
 @pytest.fixture(scope='module', autouse=True)
 def _shared_session():
-    """模块级常驻会话(P4-1):23 次 per-call 子进程 ≈ 40–70s 纯开销,复用后单文件 55s→20s。
+    """模块级常驻会话(P4-1):23 次 per-call 子进程 ≈ 40–70s 纯开销,复用后单文件 55s→17s。
 
-    仅串行 / 单 worker 启用:xdist 多 worker 下,mcp SDK 在 Windows 的
-    Proactor spawn 存在概率性卡死(实测 -n≥8 约 50% 触发,卡在 stdio_client
-    的进程创建,与本仓库代码无关),此时回退到逐调用子进程模式(CI 的历史稳定路径)。
+    配合模块级 xdist_group('mcp') + CI 的 --dist loadgroup:本模块全部用例固定在
+    同一 worker,会话只建一次,等价于已验证稳定的串行条件。会话初始化最多重试
+    一次;两次都失败(极小概率的第三方 spawn 竞态)则放弃会话,回退到逐调用
+    子进程模式(CI 的历史稳定路径)——最坏情况是慢,不是红。
     """
-    if os.environ.get('PYTEST_XDIST_WORKER'):
-        yield
-        return
     global _SESSION
-    _SESSION = _McpSession()
+    for _ in range(2):
+        try:
+            _SESSION = _McpSession()
+            break
+        except Exception as e:  # noqa: BLE001 - 兜底路径必须接住任何初始化失败
+            print(f'MCP 共享会话初始化失败,重试: {e!r}', file=sys.stderr)
+            _SESSION = None
     yield
-    _SESSION.close()
-    _SESSION = None
+    if _SESSION is not None:
+        _SESSION.close()
+        _SESSION = None
 
 
 def _call_oneoff(tool_args: dict, name: str) -> tuple:
-    """逐调用子进程模式(xdist 下使用):每次握手后即弃,稳健但慢。"""
+    """逐调用子进程模式(共享会话不可用时的兜底):每次握手后即弃,稳健但慢。"""
 
     async def action(session):
         tools = await session.list_tools()
