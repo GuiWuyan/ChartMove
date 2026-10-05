@@ -1,9 +1,4 @@
-"""冒烟测试:20 种图表类型 × 静态 PNG 全量;动画按实现抽样 4 代表型 × GIF / MP4。
-
-矩阵内 line 自带区间带、dumbbell 为坡度图(slope=True);另覆盖:pdf / tif 静态格式、
-13 主题、横向条形、figsize / dpi 参数、中文缺字检测与校验错误。
-产物写入 pytest 临时目录,断言后即删。
-"""
+"""冒烟测试:22 类型 × 静态 PNG 全量,动画抽样 5 代表型 × GIF / MP4;产物即测即删。"""
 from __future__ import annotations
 
 import shutil
@@ -32,35 +27,39 @@ from chartmove import (
     hist,
     line,
     line_multi,
+    pareto,
     pie,
     radar,
     rose,
     scatter,
+    sunburst,
     treemap,
     waterfall,
 )
-from chartmove.core import (
-    FRAMES,
-    GIF_FPS,
+from chartmove.graph.charts.categorical import (
     _bar_draw,
     _bar_multi_draw,
-    _box_draw,
-    _bubble_draw,
-    _combo_draw,
-    _downsample,
-    _funnel_draw,
-    _heatmap_draw,
-    _hist_draw,
-    _line_draw,
-    _line_multi_draw,
-    _lttb_indices,
-    _nf,
-    _pie_like_draw,
-    _scatter_draw,
-    _stagger,
-    _theme,
+    _pareto_draw,
     _waterfall_draw,
 )
+from chartmove.graph.charts.composition import _pie_like_draw, _sunburst_draw
+from chartmove.graph.charts.distribution import (
+    _box_draw,
+    _bubble_draw,
+    _heatmap_draw,
+    _hist_draw,
+    _scatter_draw,
+)
+from chartmove.graph.charts.flow import _funnel_draw
+from chartmove.graph.charts.trend import (
+    _area_draw,
+    _combo_draw,
+    _line_draw,
+    _line_multi_draw,
+)
+from chartmove.graph.render import FRAMES, GIF_FPS, _stagger
+from chartmove.graph.style import _nf, _theme
+from chartmove.graph.validate import _downsample, _lttb_indices
 from chartmove.themes import THEME_DESCS, THEME_LABELS, THEME_PACKS
 
 HAS_FFMPEG = shutil.which('ffmpeg') is not None
@@ -68,6 +67,7 @@ HAS_FFMPEG = shutil.which('ffmpeg') is not None
 CATS = ['Q1', 'Q2', 'Q3', 'Q4']
 VALS = [120, 200, 90, 160]
 SERIES = [('销售额', [120, 200, 150, 260]), ('成本', [90, 120, 130, 110])]
+HIERARCHY = {'线上': {'直营': 40, '分销': 25}, '门店': {'直营': 20, '加盟': 15}}
 XS = [1, 2, 3, 4, 5, 6]
 YS = [120, 200, 90, 160, 210, 150]
 MATRIX = [[3, 7, 2, 5], [8, 1, 6, 4], [2, 5, 9, 3], [6, 2, 4, 8]]
@@ -101,6 +101,8 @@ CASES: dict[str, tuple] = {
     'treemap': (treemap, dict(SINGLE)),
     'gantt': (gantt, dict(tasks=CATS, starts=[1, 4, 8, 12], ends=[5, 9, 13, 15])),
     'dumbbell': (dumbbell, dict(categories=CATS, series=SERIES, slope=True)),
+    'sunburst': (sunburst, dict(hierarchy=HIERARCHY)),
+    'pareto': (pareto, dict(SINGLE)),
 }
 
 
@@ -121,14 +123,15 @@ def _assert_ok(path: Path, ext: str, warns: list[str]) -> None:
     path.unlink()  # 即测即删
 
 
-ANIM_SAMPLE = ('bar', 'line', 'line_multi', 'heatmap')
-"""动画矩阵抽样(P4-2):20 类 × 2 动画曾是 CI 时长大头,按动画实现取代表——
-bar=逐根升起、line=渐进折线(含区间带逐帧展开)、line_multi=多系列渐进、heatmap=逐格淡入。"""
+ANIM_SAMPLE = ('bar', 'line', 'line_multi', 'heatmap', 'sunburst')
+"""动画矩阵抽样(P4-2):全类型 × 2 动画曾是 CI 时长大头,按动画实现取代表——
+bar=逐根升起、line=渐进折线(含区间带逐帧展开)、line_multi=多系列渐进、
+heatmap=逐格淡入、sunburst=双环扇形展开。"""
 
 
 @pytest.mark.parametrize('name', list(CASES))
 def test_matrix_static(name, tmp_path):
-    """验收主体:20 种类型 × 静态 PNG 全量(覆盖所有绘制分支,~0.1s/张)。"""
+    """验收主体:21 种类型 × 静态 PNG 全量(覆盖所有绘制分支,~0.1s/张)。"""
     fn, kw = CASES[name]
     path, warns = _render(fn, kw, tmp_path, fmt='png')
     _assert_ok(path, 'png', warns)
@@ -229,18 +232,20 @@ def _stability_draws() -> dict:
         'line_multi': lambda: _line_multi_draw('t', cats, series, th),
         'combo': lambda: _combo_draw('t', cats, vals, [80, 140, 100, 180], th, '柱', '线'),
         'bar_multi': lambda: _bar_multi_draw('t', cats, series, th),
+        'bar_multi_stacked': lambda: _bar_multi_draw('t', cats, series, th, stacked=True),
         'scatter': lambda: _scatter_draw('t', xs, ys, th),
         'bubble': lambda: _bubble_draw('t', xs, ys, [10, 40, 5, 25, 35, 15], th),
         'hist': lambda: _hist_draw('t', [68, 72, 70, 75, 77, 80, 82, 85], 8, th),
         'box': lambda: _box_draw('t', [('组A', [3, 5, 4, 6, 7]), ('组B', [8, 9, 7])], th),
         'waterfall': lambda: _waterfall_draw('t', cats, vals, th),
         'funnel': lambda: _funnel_draw('t', ['访问', '加购'], [1000, 420], th),
+        'pareto': lambda: _pareto_draw('t', cats, vals, th),
     }
 
 
 def test_axes_limits_stable_during_animation():
     """动画期间坐标轴固定:逐元素出现的图(散点/气泡/箱线/折线等)轴不得随数据扩张滑动。"""
-    fig, axes = plt.subplots(2, 6, figsize=(18, 6))
+    fig, axes = plt.subplots(2, 7, figsize=(21, 6))
     try:
         for ax, (name, build) in zip(axes.flat, _stability_draws().items()):
             draw = build()
@@ -346,6 +351,149 @@ def test_waterfall_total_false():
         rects = sorted(ax.patches, key=lambda r: r.get_x())
         assert len(rects) == 3                      # 无「合计」柱
         assert [r.get_height() for r in rects] == pytest.approx([100, 40, 50])
+    finally:
+        plt.close(fig)
+
+
+def test_bar_multi_stacked_geometry():
+    """堆积柱几何:每段柱底 = 前系列终值累计;百分比堆积每类目柱顶合计 = 100。"""
+    fig, ax = plt.subplots()
+    try:
+        _bar_multi_draw('t', CATS, SERIES, _theme('business'), stacked=True)(ax, 1.0)
+        rects = ax.patches  # 逐系列成批:前 4 根 = 系列1,后 4 根 = 系列2
+        assert len(rects) == 8
+        for ci in range(4):
+            assert rects[ci].get_x() + rects[ci].get_width() / 2 == pytest.approx(ci)
+            assert rects[ci].get_y() == 0
+            assert rects[4 + ci].get_y() == pytest.approx(SERIES[0][1][ci])
+            assert rects[4 + ci].get_height() == pytest.approx(SERIES[1][1][ci])
+    finally:
+        plt.close(fig)
+    fig, ax = plt.subplots()
+    try:
+        _bar_multi_draw('t', CATS, SERIES, _theme('business'), percent=True)(ax, 1.0)
+        assert ax.get_ylim() == (0.0, 100.0)  # 百分比堆积轴固定 0–100
+        for ci in range(4):
+            top = max(r.get_y() + r.get_height() for r in ax.patches
+                      if abs(r.get_x() + r.get_width() / 2 - ci) < 0.01)
+            assert top == pytest.approx(100)
+    finally:
+        plt.close(fig)
+
+
+def test_area_multi_and_stacked(tmp_path):
+    """多系列面积三种模式(叠加 / 堆积 / 百分比堆积)全部出图;堆积校验契约。"""
+    for sp in ({}, {'stacked': True}, {'percent': True}):
+        path, warns = _render(area, dict(categories=CATS, series=SERIES, **sp), tmp_path)
+        _assert_ok(path, 'png', warns)
+    path, warns = _render(area, dict(categories=CATS, values=VALS, name='访问量'),
+                          tmp_path)  # 单系列路径不回归
+    _assert_ok(path, 'png', warns)
+    with pytest.raises(ValueError, match='二选一'):
+        area('t', CATS, VALS, series=SERIES)
+    with pytest.raises(ValueError, match=r'values\(单系列\)'):
+        area('t', CATS)
+    with pytest.raises(ValueError, match='堆积面积图需要多系列'):
+        area('t', CATS, VALS, stacked=True)
+    with pytest.raises(ValueError, match='需 >=0'):
+        area('t', CATS, series=[('a', [1, -2, 3, 4]), ('b', [1, 2, 3, 4])],
+             stacked=True)
+
+
+def test_area_stacked_geometry():
+    """堆积面积分层:下层 0→系列1,上层系列1→两系列累计;百分比堆积轴 0–100。"""
+    from matplotlib.collections import PolyCollection
+    fig, ax = plt.subplots()
+    try:
+        _area_draw('t', CATS, SERIES, _theme('business'), stacked=True)(ax, 1.0)
+        polys = [c for c in ax.collections if isinstance(c, PolyCollection)]
+        assert len(polys) == 2
+        ys0 = [y for poly in polys[0].get_paths() for pts in poly.to_polygons()
+               for _, y in pts]
+        ys1 = [y for poly in polys[1].get_paths() for pts in poly.to_polygons()
+               for _, y in pts]
+        assert min(ys0) == pytest.approx(0) and max(ys0) == pytest.approx(260)
+        assert min(ys1) == pytest.approx(120)  # 上层底 = 系列1 的值序列
+        assert max(ys1) == pytest.approx(370)  # 上层顶 = 两系列累计
+    finally:
+        plt.close(fig)
+    fig, ax = plt.subplots()
+    try:
+        _area_draw('t', CATS, SERIES, _theme('business'), percent=True)(ax, 1.0)
+        assert ax.get_ylim() == (0.0, 100.0)
+    finally:
+        plt.close(fig)
+
+
+def test_sunburst_labels_and_validation(tmp_path):
+    """旭日图:内外环标签齐备;层级数据校验契约(空/无子级/负值/全零/形状)。"""
+    fig, ax = plt.subplots()
+    try:
+        _sunburst_draw('t', [('线上', [('直营', 40), ('分销', 25)]),
+                             ('门店', [('直营', 20), ('加盟', 15)])],
+                       _theme('business'))(ax, 1.0)
+        texts = [t.get_text() for t in ax.texts]
+        assert '线上' in texts and '门店' in texts          # 内环父类目
+        assert '直营 40' in texts and '加盟 15' in texts    # 外环"子类目 数值"
+    finally:
+        plt.close(fig)
+    path, warns = _render(sunburst, dict(hierarchy=HIERARCHY), tmp_path, animate=True,
+                          fmt='gif')
+    _assert_ok(path, 'gif', warns)  # 双环扇形展开动画
+    with pytest.raises(ValueError, match='不能为空'):
+        sunburst('t', {})
+    with pytest.raises(ValueError, match='至少需要 1 个子类目'):
+        sunburst('t', {'水果': {}})
+    with pytest.raises(ValueError, match='需 >=0'):
+        sunburst('t', {'水果': {'苹果': -5}})
+    with pytest.raises(ValueError, match='需有正值'):
+        sunburst('t', {'水果': {'苹果': 0}, '门店': {'直营': 0}})
+    with pytest.raises(ValueError, match='子类目'):
+        sunburst('t', [['水果', [30]]])
+    with pytest.raises(ValueError, match='hierarchy 需为'):
+        sunburst('t', [['水果', {'苹果': 30}, '多出来的']])
+
+
+def test_pareto_sorted_and_cumulative():
+    """帕累托:柱自动降序,右轴累计占比 = cumsum/total 且轴钉 0–100,80% 参考线存在。"""
+    fig, ax = plt.subplots()
+    try:
+        _pareto_draw('t', ['a', 'b', 'c', 'd'], [40, 10, 30, 20], _theme('business'))(ax, 1.0)
+        bars = sorted(ax.patches, key=lambda r: r.get_x())
+        assert [r.get_height() for r in bars] == pytest.approx([40, 30, 20, 10])
+        assert [t.get_text() for t in ax.get_xticklabels()] == ['a', 'c', 'd', 'b']
+        right = fig.axes[1]  # twinx 右轴
+        assert list(right.lines[0].get_ydata()) == pytest.approx([40, 70, 90, 100])
+        assert right.get_ylim() == (0.0, 100.0)
+        assert len(right.lines) == 2  # 累计线 + 80% 参考线
+    finally:
+        plt.close(fig)
+
+
+def test_pareto_validation():
+    """帕累托校验契约:负值拒绝;全零拒绝(累计占比无意义)。"""
+    with pytest.raises(ValueError, match='帕累托图'):
+        pareto('t', ['a', 'b'], [5, -3])
+    with pytest.raises(ValueError, match='需有正值'):
+        pareto('t', ['a', 'b'], [0, 0])
+
+
+def test_bar_multi_percent_labels():
+    """百分比堆积段内标签:占比 >=4% 的段标 'n%'(参考经典样式),过小段不标。"""
+    fig, ax = plt.subplots()
+    try:
+        _bar_multi_draw('t', CATS, SERIES, _theme('business'), percent=True)(ax, 1.0)
+        texts = [t.get_text() for t in ax.texts]
+        assert '57%' in texts and '43%' in texts  # Q1: 120/210、90/210
+    finally:
+        plt.close(fig)
+    tiny = [('甲', [1, 1]), ('乙', [50, 50]), ('丙', [0.5, 0.5])]
+    fig, ax = plt.subplots()
+    try:
+        _bar_multi_draw('t', ['x', 'y'], tiny, _theme('business'), percent=True)(ax, 1.0)
+        texts = [t.get_text() for t in ax.texts]
+        assert any(t == '97%' for t in texts)   # 乙 50/51.5
+        assert not any(t == '2%' for t in texts)  # 甲 1.94% < 4% 不标
     finally:
         plt.close(fig)
 
@@ -537,7 +685,7 @@ def test_line_band_draws_polygon():
 
 def test_squarify_tiling():
     """squarify 必须铺满画布且面积正比于值(回归:归一化错误会让全部格子塌缩成细条)。"""
-    from chartmove.core import _squarify
+    from chartmove.graph.style import _squarify
     vals = [420, 300, 180, 100, 60]
     sizes = [v / sum(vals) * 16.0 * 9.0 for v in vals]
     rects = _squarify(sizes, 0.0, 0.0, 16.0, 9.0)
@@ -618,7 +766,7 @@ def test_same_name_not_overwritten_animated(tmp_path):
 
 
 def test_mp4_missing_ffmpeg(monkeypatch, tmp_path):
-    import chartmove.core as core
-    monkeypatch.setattr(core.shutil, 'which', lambda _: None)
+    import chartmove.graph.render as render
+    monkeypatch.setattr(render.shutil, 'which', lambda _: None)
     with pytest.raises(RuntimeError, match='ffmpeg'):
         bar('t', CATS, VALS, out_dir=tmp_path, animate=True, fmt='mp4')

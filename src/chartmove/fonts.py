@@ -1,7 +1,4 @@
-"""中文字体注册,跨平台。
-
-现按平台候选列表依次查找,全找不到时回退 DejaVu 并打印警告(macOS / Linux 实际渲染效果待实测。
-"""
+"""中文字体注册(跨平台零配置);macOS / Linux 路径待实测。"""
 from __future__ import annotations
 
 import sys
@@ -60,9 +57,6 @@ _COMIC_FAMILIES = ('Comic Sans MS', 'Comic Neue', 'xkcd', 'xkcd Script')
 
 
 def sketch_font_chain() -> list[str]:
-    """手绘草图风的字体链:手写体在前(西文/数字),中文逐字回退平台字体。
-
-    matplotlib >=3.6 支持字体列表逐字回退,因此中文落到 FAMILY 时不会出方框。
-    """
+    """手绘风字体链:手写体在前管西文/数字,中文靠逐字回退落到 FAMILY。"""
     installed = {entry.name for entry in fontManager.ttflist}
     return [fam for fam in _COMIC_FAMILIES if fam in installed] + [FAMILY or 'DejaVu Sans']

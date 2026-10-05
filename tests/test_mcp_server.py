@@ -1,11 +1,7 @@
-"""验收测试:MCP Server 协议级实测(stdio 子进程 + 官方客户端握手)。
+"""MCP 协议级测试(stdio + 官方客户端握手)。
 
-覆盖:tools/list 收敛为 2 个工具、make_chart 出图(静态 PNG 与动画 GIF,内联与
-file 数据)、list_themes 内容、数据校验错误的中文 ToolError。
-会话为模块级常驻(P4-1):此前每次调用都重开子进程并握手,23 次调用 ≈ 40–70s 纯开销。
-xdist_group 标记 + CI 的 --dist loadgroup 把本模块固定到同一 worker 串行执行:
-Windows 的 Proactor spawn 在多 worker 并发建会话时有概率性卡死(第三方问题),
-单 worker 建会话等价于已验证稳定的串行条件,共享会话因此可以全程启用。
+xdist_group 单 worker 串行:Windows 的 Proactor spawn 并发建会话有概率性卡死
+(第三方问题);会话模块级常驻,省去每次调用的握手开销。
 """
 from __future__ import annotations
 
@@ -161,7 +157,7 @@ def test_tools_listed():
     assert set(schema['properties']['type']['enum']) == {
         'bar', 'line', 'line-multi', 'area', 'pie', 'donut', 'combo', 'bar-multi',
         'radar', 'scatter', 'bubble', 'hist', 'box', 'heatmap', 'waterfall',
-        'funnel', 'rose', 'treemap', 'gantt', 'dumbbell'}
+        'funnel', 'rose', 'treemap', 'gantt', 'dumbbell', 'sunburst', 'pareto'}
 
 
 def test_make_chart_bar_png(tmp_path):
@@ -384,6 +380,52 @@ def test_make_chart_new_types(tmp_path):
                        'series': [['s1', [1]]], 'out_dir': str(tmp_path)})
     assert result.is_error
     assert '恰好 2 个系列' in result.content[0].text
+
+
+def test_make_chart_stacked_and_sunburst(tmp_path):
+    """bar-multi 堆积 / 百分比堆积、area 多系列堆积、sunburst 层级数据与校验。"""
+    _, result = _call({'type': 'bar-multi', 'title': '渠道堆积',
+                       'categories': ['Q1', 'Q2'],
+                       'series': [['线上', [120, 200]], ['门店', [80, 90]]],
+                       'stacked': True, 'percent': True, 'out_dir': str(tmp_path)})
+    assert not result.is_error
+    p = Path(json.loads(result.content[0].text)['path'])
+    assert p.exists() and p.stat().st_size > 0
+    p.unlink()
+
+    _, result = _call({'type': 'area', 'title': '堆积面积',
+                       'categories': ['Q1', 'Q2'],
+                       'series': [['线上', [120, 200]], ['门店', [80, 90]]],
+                       'stacked': True, 'out_dir': str(tmp_path)})
+    assert not result.is_error
+    Path(json.loads(result.content[0].text)['path']).unlink()
+
+    _, result = _call({'type': 'sunburst', 'title': '层级占比',
+                       'hierarchy': {'水果': {'苹果': 30, '香蕉': 20},
+                                     '蔬菜': {'白菜': 10}},
+                       'out_dir': str(tmp_path)})
+    assert not result.is_error
+    data = json.loads(result.content[0].text)
+    assert data['type'] == 'sunburst'
+    p = Path(data['path'])
+    assert p.exists() and p.stat().st_size > 0
+    p.unlink()
+
+    _, result = _call({'type': 'sunburst', 'title': '错', 'out_dir': str(tmp_path)})
+    assert result.is_error
+    assert 'hierarchy' in result.content[0].text
+
+    _, result = _call({'type': 'pareto', 'title': '二八分析',
+                       'categories': ['a', 'b', 'c'], 'values': [5, 3, 2],
+                       'out_dir': str(tmp_path)})
+    assert not result.is_error
+    assert json.loads(result.content[0].text)['type'] == 'pareto'
+    Path(json.loads(result.content[0].text)['path']).unlink()
+
+    _, result = _call({'type': 'area', 'title': '错', 'categories': ['a'],
+                       'values': [1], 'stacked': True, 'out_dir': str(tmp_path)})
+    assert result.is_error
+    assert '需要 series' in result.content[0].text
 
 
 def test_numfmt_and_note(tmp_path):

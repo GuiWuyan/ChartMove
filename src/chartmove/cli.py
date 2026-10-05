@@ -1,19 +1,8 @@
-"""CLI 入口(M2):20 种图表类型,一条命令出图。
+"""CLI 入口:22 种图表类型,一条命令出图(数据写法与参数表见 README.md)。
 
     chartmove bar "季度产量" Q1=120 Q2=200 Q3=90 --style mckinsey
-    chartmove rose "品类占比" 手机=320 电脑=210 平板=150    # 玫瑰图(极坐标柱状)
-    chartmove line "月度增长" --data data.json        # {"categories": [...], "values": [...]}
     chartmove line-multi "对比" --categories 1月,2月,3月 --series series.json
-    chartmove combo "销量与客单价" Q1=120 Q2=200 --line 86,92
-    chartmove scatter "分布" --x 1,2,3 --y 5,7,6 --trend
-    chartmove hist "响应时长" 12 15 18 22 --bins 8
-    chartmove box "A/B 测试" --series samples.json    # [["对照组", [3.1, ...]], ...]
-    chartmove heatmap "热力" --data heat.json
-    #   heat.json: {"rows": [...], "cols": [...], "values": [[...], ...]}
-    chartmove themes                                  # 列出全部主题(按风格包)
-    chartmove themes --preview                        # 列主题并生成预览拼版图
-
-数据约定:单系列用"类目=值"内联;--data / --series 接内联 JSON 字符串或文件路径。
+    chartmove sunburst "销售构成" --data '{"水果": {"苹果": 30}}'
 """
 from __future__ import annotations
 
@@ -32,14 +21,11 @@ _XY_TYPES = ('scatter', 'bubble')
 
 
 def _chart_fn(kind: str):
-    """按类型名取 core 里的绘图函数('line-multi' → 'line_multi',20 个类型全部机械映射)。
-
-    延迟导入 matplotlib:--help / --version / themes 只做纯文本工作,不必为它们
-    付 ~0.7s 的内核启动成本;类型名拼错会推迟到出图时才报,由
-    tests/test_schema_drift.py 守住 CLI / MCP / core 三方一致。
+    """按类型名取 graph 里的绘图函数('line-multi' → 'line_multi',机械映射);
+    延迟导入让 --help / themes 等纯文本入口不付 matplotlib 启动成本。
     """
-    from . import core
-    return getattr(core, kind.replace('-', '_'))
+    from . import graph
+    return getattr(graph, kind.replace('-', '_'))
 
 
 # ---------- 入参解析 ----------
@@ -219,7 +205,37 @@ def _run_multi(kind, args):
     else:
         cats, ss = _series_or_json(args)
     vkw = {'value_labels': False} if getattr(args, 'no_value_labels', False) else {}
-    return fn(args.title, cats, ss, **vkw, **_sample_kw(args), **kw)
+    extra = {'stacked': args.stacked, 'percent': args.percent} if kind == 'bar-multi' else {}
+    return fn(args.title, cats, ss, **vkw, **extra, **_sample_kw(args), **kw)
+
+
+def _run_area(kind, args):
+    fn = _chart_fn(kind)
+    kw = _common_kwargs(args)
+    sp = {'stacked': args.stacked, 'percent': args.percent}
+    if args.file:
+        cats, cols = _file_cols(args)
+        if len(cols) >= 2:  # 多数值列自动升级为多系列面积(可堆积)
+            return fn(args.title, cats, series=cols, **sp, **_sample_kw(args), **kw)
+        return fn(args.title, cats, cols[0][1], name=cols[0][0], **sp,
+                  **_sample_kw(args), **kw)
+    d = _load_json(args.data) if args.data else None
+    if (d is not None and 'series' in d) or getattr(args, 'series', None):
+        cats, ss = _series_or_json(args)
+        return fn(args.title, cats, series=ss, **sp, **_sample_kw(args), **kw)
+    cats, vals = _pairs_or_json(args)
+    return fn(args.title, cats, vals, **sp, **_sample_kw(args), **kw)
+
+
+def _run_sunburst(kind, args):
+    if args.file:
+        raise ValueError('sunburst 暂不支持 --file(层级数据请用 --data 传 JSON)')
+    fn = _chart_fn(kind)
+    d = _load_json(args.data) if args.data else None
+    if d is None:
+        raise ValueError('sunburst 需要 --data 传两级层级 JSON,'
+                         '如 \'{"水果": {"苹果": 30}}\'(也可含 hierarchy 字段)')
+    return fn(args.title, d.get('hierarchy', d), **_common_kwargs(args))
 
 
 def _run_box(kind, args):
@@ -358,6 +374,8 @@ _RUNNERS = {
     'line-multi': _run_multi,
     'bar-multi': _run_multi,
     'radar': _run_multi,
+    'area': _run_area,
+    'sunburst': _run_sunburst,
     'box': _run_box,
     'scatter': _run_xy,
     'bubble': _run_xy,
@@ -375,7 +393,7 @@ def _themes_cmd(args) -> int:
             print(f'  {key:<11} {THEME_LABELS[key]} —— {THEME_DESCS[key]}')
     print('\n用法:--style <主题名>(默认 business)')
     if getattr(args, 'preview', False):
-        from .core import themes_preview  # 延迟导入:纯文本的 themes 不拉起 matplotlib
+        from .graph import themes_preview  # 延迟导入:纯文本的 themes 不拉起 matplotlib
         themes_preview(out=getattr(args, 'out', None),
                        out_dir=getattr(args, 'out_dir', None))
     return 0
@@ -422,10 +440,11 @@ def _build_parser() -> argparse.ArgumentParser:
         ('rose', '玫瑰图(极坐标柱状)', '数据 类目=数值(或 --data JSON)'),
         ('treemap', '矩形树图(构成)', '数据 类目=数值(或 --data JSON)'),
         ('waterfall', '瀑布图(自动补合计柱)', '数据 类目=增减值,如 1月=20'),
+        ('pareto', '帕累托图(降序柱+累计占比线+80%参考线)', '数据 类目=数值'),
         ('funnel', '漏斗图(自动标逐级转化率)', '数据 类目=数值'),
         ('combo', '双轴组合图', '柱值 类目=数值(折线值用 --line)'),
         ('line-multi', '多系列折线', None),
-        ('bar-multi', '多系列分组柱状图', None),
+        ('bar-multi', '多系列柱状图(--stacked 堆积 / --percent 百分比堆积)', None),
         ('radar', '雷达图', None),
         ('box', '箱线图', None),
         ('scatter', '散点图', None),
@@ -434,6 +453,7 @@ def _build_parser() -> argparse.ArgumentParser:
         ('heatmap', '热力图', None),
         ('gantt', '甘特图', None),
         ('dumbbell', '哑铃图/坡度图(--slope)', None),
+        ('sunburst', '旭日图(两级层级占比,--data 传层级 JSON)', None),
     ):
         sp = sub.add_parser(name, parents=[common], help=text, description=text)
         if items_help:
@@ -451,6 +471,18 @@ def _build_parser() -> argparse.ArgumentParser:
         sps[name].add_argument('--series',
                                help='系列 JSON:[[名称, [数值...]], ...] 或 {名称: [数值...]}')
         sps[name].add_argument('--categories', help='类目,逗号分隔(也可放进 --data JSON)')
+    sps['bar-multi'].add_argument('--stacked', action='store_true',
+                                  help='堆积柱状(各系列纵向堆叠)')
+    sps['bar-multi'].add_argument('--percent', action='store_true',
+                                  help='百分比堆积(每类目归一 100%%,隐含 --stacked)')
+    sps['area'].add_argument('--series',
+                             help='多系列 JSON:[[名称, [数值...]], ...](配 --categories;'
+                                  '默认叠加,--stacked/--percent 堆积)')
+    sps['area'].add_argument('--categories', help='类目,逗号分隔(也可放进 --data JSON)')
+    sps['area'].add_argument('--stacked', action='store_true',
+                             help='多系列堆积面积(需 --series 或 --file 多数值列)')
+    sps['area'].add_argument('--percent', action='store_true',
+                             help='百分比堆积(每类目归一 100%%,隐含 --stacked)')
     sps['line-multi'].add_argument('--no-value-labels', action='store_true',
                                    help='关闭数值标注')
     sps['line'].add_argument('--sample', type=int,
