@@ -7,6 +7,7 @@ from pathlib import Path
 from matplotlib.colors import to_rgb
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch, Rectangle
+from matplotlib.patheffects import Normal
 
 from ..render import _ease, _render, _stagger
 from ..style import _has_spread, _legend_bottom, _nf, _squarify, _style, _theme
@@ -169,7 +170,8 @@ def _sunburst_draw(title, hierarchy, th):
             lum = 0.299 * r + 0.587 * g + 0.114 * b
             ax.text(0.50 * math.cos(theta), 0.50 * math.sin(theta), name,
                     ha='center', va='center', fontsize=13,
-                    color='#111111' if lum > 0.6 else '#ffffff')
+                    color='#111111' if lum > 0.6 else '#ffffff',
+                    path_effects=[Normal()])  # 覆盖 sketch 的 rc 白描边,否则色块内白字糊死
         # 外环子类目:名字+数值置于中角外侧,随扇区扫过渐次出现
         off = 0.0
         for (cname, v), c in zip(kids_flat, out_colors):
@@ -222,7 +224,8 @@ def _treemap_draw(title, cats, vals, th):
                 r, g, b = to_rgb(color)
                 tc = '#111111' if 0.299 * r + 0.587 * g + 0.114 * b > 0.6 else '#ffffff'
                 ax.text(cx, cy, f'{cat}\n{_nf(v, th)}', ha='center', va='center',
-                        fontsize=14, color=tc)
+                        fontsize=14, color=tc,
+                        path_effects=[Normal()])  # 覆盖 sketch 的 rc 白描边,否则色块内白字糊死
         ax.set_xlim(0, 16.0)
         ax.set_ylim(0, 9.0)
     return draw

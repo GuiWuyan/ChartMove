@@ -7,6 +7,7 @@ import numpy as np
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
+from matplotlib.patheffects import Normal
 
 from ..render import _ease, _render, _stagger
 from ..style import (
@@ -261,7 +262,8 @@ def _heatmap_draw(title, rows, cols, arr, th, annotate=True):
                     lum = 0.299 * r + 0.587 * g + 0.114 * b
                     ax.text(j, i, _nf(arr[i, j], th), ha='center', va='center',
                             fontsize=11, color='#000000' if lum > 0.55 else '#FFFFFF',
-                            alpha=a)
+                            alpha=a,
+                            path_effects=[Normal()])  # 覆盖 sketch 的 rc 白描边,否则色块内白字糊死
         for idx in (imax, imin):  # 最大/最小格描边:随所在格一起淡入,不再末帧突现
             a = float(alpha[idx[0], idx[1]])
             if a > 0:
