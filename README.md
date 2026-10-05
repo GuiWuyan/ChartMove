@@ -158,7 +158,7 @@ CI:push / PR 自动跑 ruff lint + pytest smoke test,见 `.github/workflows/ci.y
 - 输出目录:默认项目内 `./Results/`(持久,不做 TTL 清理;同名文件自动加序号 `_2`/`_3`,不覆盖已有产物);优先级 `out_dir=` / `--out-dir` 参数 > 环境变量 `CHARTMOVE_OUT_DIR` > 默认
 - 表格直读:CLI `--file` 支持 CSV(UTF-8 / GBK)与 Excel(.xlsx / .xlsm),`--sheet` / `sheet=` 选 Excel 工作表(名称或从 1 数的序号),见 table.py
 
-依赖:matplotlib、mcp(官方 SDK,2.x 起 API 为 `MCPServer`)、pillow、openpyxl(Excel 读取)。`pyproject.toml` 用"下限 + 大版本上限"的有界区间、不精确冻结:CI 矩阵覆盖 Python 3.10–3.13,pip 按解释器版本自动挑兼容的 numpy / matplotlib(钉死高版本会让 3.10 直接装不上——历史上 `numpy>=2.5.1` 因此回退到 `>=1.24`)。
+依赖:matplotlib、mcp(官方 SDK,2.x 起 API 为 `MCPServer`)、pillow、openpyxl(Excel 读取)。`pyproject.toml` 用"下限 + 大版本上限"的有界区间、不精确冻结:CI 矩阵覆盖 Python 3.10–3.13,pip 按解释器版本自动挑兼容的 numpy / matplotlib
 
 ## LICENSE
 Apache 2.0

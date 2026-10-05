@@ -5,6 +5,7 @@ from pathlib import Path
 
 from matplotlib.colors import to_rgb
 from matplotlib.lines import Line2D
+from matplotlib.patheffects import Normal
 from matplotlib.patches import Patch
 
 from ..render import _ease, _render, _stagger
@@ -94,7 +95,8 @@ def _bar_multi_draw(title, cats, series, th, stacked=False, percent=False):
                     for ci, v in enumerate(vals):
                         if v >= 4 and prog > 0.5:
                             ax.text(ci, bases[si][ci] + v * prog / 2, f'{v:.0f}%',
-                                    ha='center', va='center', fontsize=13, color=tc)
+                                    ha='center', va='center', fontsize=13, color=tc,
+                                    path_effects=[Normal()])  # 覆盖 sketch 的 rc 白描边,否则色块内白字糊死
             else:
                 ax.bar([i + (si - m / 2 + 0.5) * w for i in range(ng)],
                        [v * prog for v in vals], width=w * 0.92, color=color, label=nm)
