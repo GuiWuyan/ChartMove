@@ -15,7 +15,7 @@ matplotlib 内核,22 种图表,13 套主题分属 4 个风格包,输出 PNG / PD
 
 命令结构:**`chartmove <类型> "标题" [数据] [通用参数] [类型专属参数]`**,输出文件绝对路径,默认写入 `./Results/`。
 
-22 种类型:`bar` / `line` / `line-multi` / `area` / `pie` / `donut` / `rose` / `treemap` / `combo` / `bar-multi` / `radar` / `scatter` / `bubble` / `hist` / `box` / `heatmap` / `waterfall` / `pareto` / `funnel` / `gantt` / `dumbbell` / `sunburst`(多词类型用 kebab-case;`chartmove --help` 看总览,`chartmove bar --help` 看单类型全部参数)。
+22 种类型:`bar` / `line` / `line-multi` / `area` / `pie` / `donut` / `rose` / `treemap` / `combo` / `bar-multi` / `radar` / `scatter` / `bubble` / `hist` / `box` / `heatmap` / `waterfall` / `pareto` / `funnel` / `gantt` / `dumbbell` / `sunburst`(多词类型用 kebab-case;`radar` 属多系列类型,数据须用 `--series` 或 `--file` 写法,不收 `类目=值`;`chartmove --help` 看总览,`chartmove bar --help` 看单类型全部参数)。
 
 **数据的四种写法**(按类型任选其一,`--file` 优先级最高):
 
@@ -144,7 +144,7 @@ CI:push / PR 自动跑 ruff lint + pytest smoke test,见 `.github/workflows/ci.y
 
 ## 图表能力
 
-- 22 种类型:`bar`(支持 `horizontal=True` 横向条形)/ `line`(可加 `lower` / `upper` 预测区间带)/ `line_multi` / `area`(单系列或多系列;多系列默认半透明叠加,`stacked=True` 堆积、`percent=True` 百分比堆积)/ `pie` / `donut` / `rose`(Nightingale 极坐标柱状,半径即数值)/ `treemap`(矩形树图,面积即占比)/ `combo` / `bar_multi`(默认分组并列,`stacked=True` 堆积、`percent=True` 百分比堆积,占比标在段内)/ `radar` / `scatter`(可选趋势线)/ `bubble` / `hist` / `box` / `heatmap` / `waterfall` / `pareto`(帕累托图:柱自动降序 + 右轴累计占比线 + 80% 参考线)/ `funnel`(自动逐级转化率)/ `gantt`(甘特图,数值轴起止)/ `dumbbell`(哑铃图,两期对比,`slope=True` 出坡度图)/ `sunburst`(旭日图,两级层级占比,内环父类目 = 子类目合计)
+- 22 种类型:`bar`(支持 `horizontal=True` 横向条形)/ `line`(可加 `lower` / `upper` 预测区间带)/ `line_multi` / `area`(单系列或多系列;多系列默认半透明叠加,`stacked=True` 堆积、`percent=True` 百分比堆积)/ `pie` / `donut` / `rose`(Nightingale 极坐标柱状,半径即数值)/ `treemap`(矩形树图,面积即占比)/ `combo` / `bar_multi`(默认分组并列,`stacked=True` 堆积、`percent=True` 百分比堆积,占比标在段内)/ `radar`(多系列,需 `series`)/ `scatter`(可选趋势线)/ `bubble` / `hist` / `box` / `heatmap` / `waterfall` / `pareto`(帕累托图:柱自动降序 + 右轴累计占比线 + 80% 参考线)/ `funnel`(自动逐级转化率)/ `gantt`(甘特图,数值轴起止)/ `dumbbell`(哑铃图,两期对比,`slope=True` 出坡度图)/ `sunburst`(旭日图,两级层级占比,内环父类目 = 子类目合计)
 - 13 套主题分属 4 个风格包(默认 `business` 商务极简):
   - **学术包**:`academic` 学术Ticks标准风 / `grayscale` 灰度单色学术 / `ggplot` 复古统计 / `colorblind` 色盲无障碍(Okabe-Ito)
   - **商务包**:`business` 商务极简 / `mckinsey` 麦肯锡 / `dashboard` 深色看板

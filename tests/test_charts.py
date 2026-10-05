@@ -8,6 +8,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
+from matplotlib import patheffects
+from matplotlib.colors import to_rgba
 from PIL import Image
 
 from chartmove import (
@@ -42,7 +44,11 @@ from chartmove.graph.charts.categorical import (
     _pareto_draw,
     _waterfall_draw,
 )
-from chartmove.graph.charts.composition import _pie_like_draw, _sunburst_draw
+from chartmove.graph.charts.composition import (
+    _pie_like_draw,
+    _sunburst_draw,
+    _treemap_draw,
+)
 from chartmove.graph.charts.distribution import (
     _box_draw,
     _bubble_draw,
@@ -494,6 +500,35 @@ def test_bar_multi_percent_labels():
         texts = [t.get_text() for t in ax.texts]
         assert any(t == '97%' for t in texts)   # 乙 50/51.5
         assert not any(t == '2%' for t in texts)  # 甲 1.94% < 4% 不标
+    finally:
+        plt.close(fig)
+
+
+def test_in_area_labels_override_sketch_stroke():
+    """sketch 的 rc 白描边会把色块内白字糊死(2026-10-05 修复):treemap 格内、
+    旭日图内环、热力图标注、百分比堆积段内四处的白色文字必须显式以
+    patheffects.Normal 覆盖 rc。注意 get_path_effects() 未显式设置时会回退
+    返回 rc 效果,故断言效果类型而非非空——删掉覆盖本测试即红。"""
+    th = _theme('sketch')
+    fig, ax = plt.subplots()
+    try:
+        draws = [
+            _treemap_draw('t', CATS, VALS, th),
+            _sunburst_draw('t', [('线上', [('直营', 40), ('分销', 25)]),
+                                 ('门店', [('直营', 20), ('加盟', 15)])], th),
+            _heatmap_draw('t', ['r1', 'r2'], ['c1', 'c2', 'c3'],
+                          np.array([[1, 9, 2], [3, 5, 4]]), th),
+            _bar_multi_draw('t', CATS, SERIES, th, percent=True),
+        ]
+        for draw in draws:
+            ax.clear()
+            draw(ax, 1.0)
+            whites = [t for t in ax.texts
+                      if to_rgba(t.get_color())[:3] == (1.0, 1.0, 1.0)]
+            assert whites, '应存在色块内白字,否则此测试失去意义'
+            for t in whites:
+                assert [type(e) for e in t.get_path_effects()] == [patheffects.Normal], \
+                    f'白字 {t.get_text()!r} 未覆盖 sketch 的 rc 白描边,会糊成一团'
     finally:
         plt.close(fig)
 

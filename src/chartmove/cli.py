@@ -524,6 +524,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> int:
+    # 非 tty 管道下,非中文 locale(如 cp1252)编不了中文会直接 UnicodeEncodeError:
+    # 降级为替换字符而非崩溃;交互终端与 utf-8 环境不受影响(PLAN §4-3)
+    for stream in (sys.stdout, sys.stderr):
+        if stream is not None and not stream.isatty() and hasattr(stream, 'reconfigure'):
+            stream.reconfigure(errors='replace')
     args = _build_parser().parse_args(argv)
     try:
         result = args.func(args)
