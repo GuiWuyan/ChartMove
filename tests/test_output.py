@@ -1,4 +1,4 @@
-"""output.py 单测:目录优先级(out_dir > CHARTMOVE_OUT_DIR > ~/Chartmove)、文件名清洗与同名不覆盖。"""
+"""output.py 单测:目录优先级(out_dir > CHARTMOVE_OUT_DIR > ./Results/)、文件名清洗与同名不覆盖。"""
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
@@ -71,3 +71,45 @@ def test_claim_path_exhaustion(tmp_path):
     p.write_bytes(b'x')
     with pytest.raises(OSError, match='唯一文件名'):
         claim_path(p, limit=0)
+
+
+def test_resolve_out_dir_error_chinese(tmp_path, monkeypatch):
+    """目录创建失败报中文可操作错误(含建议),不裸抛 WinError。"""
+    monkeypatch.delenv('CHARTMOVE_OUT_DIR', raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    def boom(self, *a, **k):
+        raise PermissionError(5, '拒绝访问')
+
+    monkeypatch.setattr('pathlib.Path.mkdir', boom)
+    with pytest.raises(RuntimeError, match='无法创建输出目录'):
+        resolve_out_dir(tmp_path / 'blocked')
+
+
+def test_claim_path_skips_denied_candidate(tmp_path, monkeypatch):
+    """Windows 怪癖:同名隐藏/系统文件让 O_EXCL 报 PermissionError 而非 FileExistsError,
+    claim_path 换序号继续;目录级连续被拒则报中文可操作错误。"""
+    import os as os_mod
+
+    import chartmove.output as out_mod
+
+    real_open = os_mod.open
+    calls = {'n': 0}
+
+    def first_denied(path, flags, *a, **k):
+        calls['n'] += 1
+        if calls['n'] == 1:
+            raise PermissionError(13, 'Permission denied')
+        return real_open(path, flags, *a, **k)
+
+    monkeypatch.setattr(out_mod.os, 'open', first_denied)
+    claimed = claim_path(tmp_path / 'x.png')
+    assert claimed == tmp_path / 'x_2.png'
+    claimed.unlink()
+
+    def always_denied(path, flags, *a, **k):
+        raise PermissionError(13, 'Permission denied')
+
+    monkeypatch.setattr(out_mod.os, 'open', always_denied)
+    with pytest.raises(RuntimeError, match='无法在'):
+        claim_path(tmp_path / 'y.png')

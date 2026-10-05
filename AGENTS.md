@@ -1,6 +1,6 @@
 # AGENTS.md — chartmove 调用须知(面向使用本工具出图的 agent)
 
-chartmove 是中文数据图表生成器:20 种图表 × 13 主题(4 风格包),输出 PNG / PDF / TIF / GIF / MP4。入口只有两个:CLI 与 MCP Server(stdio)。
+chartmove 是中文数据图表生成器:22 种图表,13 套主题分属 4 个风格包,输出 PNG / PDF / TIF / GIF / MP4。入口只有两个:CLI 与 MCP Server(stdio)。
 
 ## 调用方式
 

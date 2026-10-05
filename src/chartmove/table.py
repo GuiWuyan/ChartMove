@@ -1,10 +1,4 @@
-"""表格文件读取与取列:CSV / Excel → 图表数据,CLI --file 与 MCP file 共用。
-
-CSV 兼容 UTF-8(-sig)与 GBK(Excel 中文导出常见);Excel 仅支持 .xlsx / .xlsm,
-sheet 参数按工作表名称或从 1 数的序号选择(缺省第一个;CSV 无工作表概念)。
-首行一律视为表头;列约定:类目列默认第 1 列,数值列 = 其余列(或 col 挑 1 列),
-各取数函数对应一类图表的列布局(bar/line/combo/box/xy/hist/heatmap,见各 docstring)。
-"""
+"""表格读取与取列:CSV(UTF-8/GBK)与 Excel → 图表数据,CLI --file 与 MCP file 共用。"""
 from __future__ import annotations
 
 import csv
@@ -17,10 +11,7 @@ __all__ = [
 
 
 def read_table(path: str | Path, sheet=None) -> tuple[list[str], list[list[str]]]:
-    """读取表格,返回 (表头, 数据行);空行剔除,单元格已去空白。
-
-    sheet 仅对 Excel 有效:工作表名称或从 1 数的序号,缺省读第一个。
-    """
+    """读取表格,返回 (表头, 数据行);空行剔除;sheet 仅对 Excel 有效(名称或 1 起序号)。"""
     p = Path(path)
     suffix = p.suffix.lower()
     if suffix not in ('.csv', '.xlsx', '.xlsm'):
@@ -36,11 +27,7 @@ def read_table(path: str | Path, sheet=None) -> tuple[list[str], list[list[str]]
 
 
 def parse_float(text, where: str = '') -> float:
-    """内联标量转数值:容忍千分位逗号与空白;失败报中文并指出位置。
-
-    float() 的原味英文异常(could not convert ...)不允许透传到用户面前;
-    nan / inf 在这里是合法浮点,由 core._check_finite 负责报中文错,勿在此拦截。
-    """
+    """内联标量转数值(容忍千分位逗号);nan/inf 在此合法,由校验层报中文错。"""
     s = str(text).replace(',', '').strip()
     try:
         return float(s)
@@ -74,8 +61,7 @@ def pick_column(spec: str | None, header: list[str], default: int | None = None)
 
 def file_columns(path, cat_col=None, col=None,
                  sheet=None) -> tuple[list[str], list[tuple[str, list[float]]]]:
-    """类目型图表取数(bar/line/area/pie/donut/waterfall/funnel/combo/多系列):
-    类目列(默认第 1 列)+ 数值列(默认除类目列外全部;col 挑 1 列),
+    """类目型取数:类目列(默认第 1 列)+ 数值列(默认其余全部,col 挑 1 列),
     返回 (类目, [(列名, 数值列表)]),数值列空单元格剔除。"""
     header, rows = read_table(path, sheet)
     cat_i = pick_column(cat_col, header, 0)
@@ -101,8 +87,7 @@ def file_box_groups(path, sheet=None) -> list[tuple[str, list[float]]]:
 
 def file_xy(path, *, sizes=False, sheet=None) -> tuple[list[float], list[float],
                                                        list[float] | None, list[str] | None]:
-    """散点/气泡取数:列顺序 x, y(, sizes)(, labels),各列空单元格独立剔除
-    (可能与 x/y 不对齐,由校验兜底);sizes=True 才读第 3 列气泡大小。"""
+    """散点/气泡取数:列顺序 x, y(, sizes)(, labels),各列独立剔除空单元格。"""
     header, rows = read_table(path, sheet)
     xs = [to_float(r[0], '(列 1)') for r in rows if r and r[0] != '']
     ys = [to_float(r[1], '(列 2)') for r in rows if len(r) > 1 and r[1] != '']
@@ -164,8 +149,7 @@ def _read_excel(path, sheet=None) -> tuple[list[str], list[list[str]]]:
 
 
 def _resolve_sheet(wb, sheet) -> str:
-    """按名称或从 1 数的序号定位工作表,返回表名(与列定位 pick_column 语义一致);
-    名称优先于序号:精确命中某工作表名时按名称解析('2024' 是常见年份表名)。"""
+    """按名称或从 1 数的序号定位工作表;名称优先('2024' 是常见年份表名)。"""
     names = wb.sheetnames
     if isinstance(sheet, str) and sheet in names:
         return sheet

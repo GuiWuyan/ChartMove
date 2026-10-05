@@ -1,10 +1,5 @@
-"""MCP Server 入口:把 chartmove 暴露给 AI / agent,stdio 传输。
-工具面收敛为 2 个:
-    make_chart   生成图表,返回 JSON {path(绝对路径), file_size, type, style, animated}
-    list_themes  列出 13 主题 × 4 风格包(名称 + 一句话描述)
-约定:工具 schema 描述用英文(LLM 选工具靠它);数据校验错误转 ToolError,消息保持中文;
-返回的 path 即交付物,桌宠/host 只需展示该文件;animate=true 默认出 GIF。
-"""
+"""MCP Server(stdio):make_chart 出图 + list_themes 列主题;工具描述用英文,
+数据校验错误保持中文 ToolError;返回 JSON 里的 path 即交付物。"""
 from __future__ import annotations
 
 import contextlib
@@ -23,21 +18,19 @@ from .themes import THEME_DESCS, THEME_LABELS, THEME_PACKS, THEMES
 ChartType = Literal[
     'bar', 'line', 'line-multi', 'area', 'pie', 'donut', 'combo', 'bar-multi',
     'radar', 'scatter', 'bubble', 'hist', 'box', 'heatmap', 'waterfall', 'funnel',
-    'rose', 'treemap', 'gantt', 'dumbbell']
+    'rose', 'treemap', 'gantt', 'dumbbell', 'sunburst', 'pareto']
 Fmt = Literal['png', 'pdf', 'tif', 'gif', 'mp4']
 
 
 def _chart_fn(name: str):
-    """按类型名取 core 里的绘图函数('line-multi' → 'line_multi',20 个类型全部机械映射)。
-
-    延迟导入 matplotlib:MCP 进程启动(握手、工具发现)不必付内核 ~0.7s;
-    类型名拼错会推迟到调用才报,由 tests/test_schema_drift.py 守住三方一致。
+    """按类型名取 graph 里的绘图函数('line-multi' → 'line_multi',机械映射),
+    延迟导入让 MCP 握手阶段不付 matplotlib 启动成本。
     """
-    from . import core
-    return getattr(core, name.replace('-', '_'))
+    from . import graph
+    return getattr(graph, name.replace('-', '_'))
 
 _PAIR_TYPES = ('bar', 'line', 'area', 'pie', 'donut', 'waterfall', 'funnel', 'rose',
-               'treemap')
+               'treemap', 'pareto')
 _SERIES_TYPES = ('line-multi', 'bar-multi', 'radar')
 _XY_TYPES = ('scatter', 'bubble')
 
@@ -45,7 +38,7 @@ server = MCPServer(
     name='chartmove',
     version=__version__,
     instructions=(
-        'Chinese chart generator: 20 chart types x 13 themes, no font configuration '
+        'Chinese chart generator: 22 chart types x 13 themes, no font configuration '
         'needed, output is a persistent file. Use list_themes to discover styles. '
         'Call make_chart with inline data or a CSV/Excel file path (file param); '
         'the returned "path" (absolute path to the image file) IS the deliverable - '
@@ -71,10 +64,7 @@ def _norm_series(series) -> list[tuple[str, list[float]]]:
 
 
 def _bins(bins):
-    """bins 规范化:整数 / 'auto' / 严格递增的分箱边界(与 CLI --bins 语义一致)。
-
-    边界的递增校验必须在这里做:np.histogram 遇到乱序边界抛的是英文 ValueError。
-    """
+    """bins 规范化:整数 / 'auto' / 严格递增边界(递增校验在此做,np.histogram 的异常是英文)。"""
     if isinstance(bins, str):
         if bins == 'auto':
             return 'auto'
@@ -101,6 +91,16 @@ def _bins(bins):
         'rose/treemap/waterfall/funnel): categories + values, or '
         'series=[[name, [values]], ...] '
         'for multi-series (combo also needs line_values); '
+        'bar-multi: stacked=true stacks the series vertically, percent=true '
+        'normalizes each category to 100% (implies stacked); '
+        'area with series: multi-series by default translucent overlaid, '
+        'stacked=true layered stacking, percent=true 100% stacked; '
+        'sunburst (two-level hierarchical composition): hierarchy = '
+        '{parent: {child: value}, ...} (list of [parent, {child: value}] pairs '
+        'also accepted), inner ring = parents (value = sum of children), '
+        'outer ring = children; '
+        'pareto: categories + values, auto-sorted descending with a cumulative '
+        '% line and an 80% guide on the right axis; '
         'gantt: categories (task names) + starts + ends (numeric units); '
         'dumbbell: series with EXACTLY 2 entries (before/after), '
         'slope=true switches to a slope chart; '
@@ -118,8 +118,9 @@ def _bins(bins):
         'sheet (Excel only, optional): worksheet name or 1-based index, '
         'default first sheet; ignored for CSV. File column layout: '
         'category charts use the 1st column as categories and the rest as value '
-        'columns (bar/line auto-upgrade to bar-multi/line-multi with >=2 value '
-        'columns; area/pie/donut/rose/waterfall/funnel need col to pick one); '
+        'columns (bar/line/area auto-upgrade to bar-multi/line-multi/multi-series '
+        'area with >=2 value columns; pie/donut/rose/waterfall/funnel need col '
+        'to pick one); '
         'combo: 1st value col = bars, 2nd = line; '
         'box: every column = one group of raw samples; '
         'scatter/bubble: columns x, y (, sizes) (, labels); '
@@ -162,6 +163,8 @@ def make_chart(
     horizontal: bool = False,
     trend: bool = False,
     total: bool = True,
+    stacked: bool = False,
+    percent: bool = False,
     bins: int | str | list[float] = 10,
     sample: int | None = None,
     lower: list[float] | None = None,
@@ -169,6 +172,7 @@ def make_chart(
     starts: list[float] | None = None,
     ends: list[float] | None = None,
     slope: bool = False,
+    hierarchy: dict[str, dict[str, float]] | list | None = None,
     numfmt: Literal['auto', 'plain', 'percent'] = 'auto',
     note: str | None = None,
     file: str | None = None,
@@ -191,7 +195,18 @@ def make_chart(
             if file is not None:  # 文件数据优先于内联参数(与 CLI --file 一致)
                 return _from_file(type, title, file, cat_col, col, sheet, common,
                                   horizontal=horizontal, trend=trend, total=total,
-                                  bins=bins, slope=slope)
+                                  stacked=stacked, percent=percent, bins=bins, slope=slope)
+            if type == 'area' and (series is not None or stacked or percent):
+                # 多系列面积(可堆积):series 给出,或单系列误传堆积开关时给出指路错误
+                if series is None:
+                    raise ToolError('堆积面积图需要 series(多系列数据);'
+                                    '单系列面积图无需 stacked / percent')
+                _require(categories is not None, 'area 多系列需要 categories')
+                return _result(_chart_fn('area')(title, categories,
+                                                 series=_norm_series(series),
+                                                 stacked=stacked, percent=percent,
+                                                 **common),
+                               type, style, animate)
             if type in _PAIR_TYPES:
                 _require(categories is not None and values is not None,
                          'categories 与 values 不能为空')
@@ -215,8 +230,10 @@ def make_chart(
             if type in _SERIES_TYPES:
                 _require(categories is not None and series is not None,
                          '多系列图需要 categories 与 series')
+                extra = ({'stacked': stacked, 'percent': percent}
+                         if type == 'bar-multi' else {})
                 return _result(_chart_fn(type)(title, categories,
-                                               _norm_series(series), **common),
+                                               _norm_series(series), **extra, **common),
                                type, style, animate)
             if type == 'box':
                 _require(series is not None,
@@ -258,6 +275,12 @@ def make_chart(
                 return _result(_chart_fn('dumbbell')(title, categories, ss,
                                                      slope=slope, **common),
                                type, style, animate)
+            if type == 'sunburst':
+                _require(hierarchy is not None,
+                         'sunburst 需要 hierarchy(两级层级数据,'
+                         '如 {"水果": {"苹果": 30}})')
+                return _result(_chart_fn('sunburst')(title, hierarchy, **common),
+                               type, style, animate)
             raise ToolError(f'未知图表类型 {type!r},'
                             f'可选:{", ".join(get_args(ChartType))}')
     except (ValueError, RuntimeError, OSError) as e:  # 中文校验消息 → ToolError
@@ -265,7 +288,7 @@ def make_chart(
 
 
 def _from_file(type, title, file, cat_col, col, sheet, common, *, horizontal, trend,
-               total, bins, slope) -> str:
+               total, stacked, percent, bins, slope) -> str:
     """file 数据出图:列约定与 CLI --file 一致,数据转换复用 table.py。"""
 
     def done(path, type_name: str):
@@ -276,7 +299,8 @@ def _from_file(type, title, file, cat_col, col, sheet, common, *, horizontal, tr
         _require(cols, 'file 至少需要 1 列数值')
         if len(cols) >= 2:  # 多数值列自动升级为多系列(与 CLI --file 一致)
             if type == 'bar':
-                return done(_chart_fn('bar-multi')(title, cats, cols, **common),
+                return done(_chart_fn('bar-multi')(title, cats, cols, stacked=stacked,
+                                                   percent=percent, **common),
                             'bar-multi')
             # 区间带只对单系列折线有意义:必须摘掉 lower/upper 再调 line-multi,
             # 否则未知关键字 TypeError 裸穿 except(它不在中文转换的异常元组里)
@@ -293,7 +317,14 @@ def _from_file(type, title, file, cat_col, col, sheet, common, *, horizontal, tr
                                          horizontal=horizontal, **common), type)
         return done(_chart_fn('line')(title, cats, cols[0][1], name=cols[0][0],
                                       **common), type)
-    if type in ('area', 'pie', 'donut', 'rose', 'treemap', 'waterfall', 'funnel'):
+    if type == 'area':
+        cats, cols = file_columns(file, cat_col, col, sheet)
+        _require(cols, 'file 至少需要 1 列数值')
+        if len(cols) >= 2:  # 多数值列自动升级为多系列面积(可堆积)
+            return done(_chart_fn('area')(title, cats, series=cols, stacked=stacked,
+                                          percent=percent, **common), 'area')
+        return done(_chart_fn('area')(title, cats, cols[0][1], **common), type)
+    if type in ('pie', 'donut', 'rose', 'treemap', 'waterfall', 'funnel', 'pareto'):
         cats, cols = file_columns(file, cat_col, col, sheet)
         _require(len(cols) == 1,
                  f'{type} 只支持 1 列数值,file 里有 {len(cols)} 列(可用 col 挑 1 列)')
@@ -311,7 +342,8 @@ def _from_file(type, title, file, cat_col, col, sheet, common, *, horizontal, tr
     if type in _SERIES_TYPES:  # line-multi / bar-multi / radar:各数值列 = 一个系列
         cats, cols = file_columns(file, cat_col, col, sheet)
         _require(cols, 'file 至少需要 1 列数值')
-        return done(_chart_fn(type)(title, cats, cols, **common), type)
+        extra = {'stacked': stacked, 'percent': percent} if type == 'bar-multi' else {}
+        return done(_chart_fn(type)(title, cats, cols, **extra, **common), type)
     if type == 'box':
         return done(_chart_fn('box')(title, file_box_groups(file, sheet), **common),
                     type)
@@ -343,6 +375,8 @@ def _from_file(type, title, file, cat_col, col, sheet, common, *, horizontal, tr
                  f'dumbbell 的 file 需要 2 列数值(期初、期末),收到 {len(cols)} 列')
         return done(_chart_fn('dumbbell')(title, cats, [cols[0], cols[1]],
                                           slope=slope, **common), type)
+    if type == 'sunburst':
+        raise ToolError('sunburst 暂不支持 file 数据(层级数据请用 hierarchy 内联参数)')
     raise ToolError(f'未知图表类型 {type!r},可选:{", ".join(get_args(ChartType))}')
 
 
@@ -372,7 +406,7 @@ def list_themes(preview: bool = False, out_dir: str | None = None) -> str:
         lines.append(f'[{pack}]')
         lines += [f'  {k} | {THEME_LABELS[k]} | {THEME_DESCS[k]}' for k in members]
     if preview:
-        from .core import themes_preview  # 延迟导入:纯文本的 list_themes 不拉起 matplotlib
+        from .graph import themes_preview  # 延迟导入:纯文本的 list_themes 不拉起 matplotlib
         with contextlib.redirect_stdout(sys.stderr):
             path = themes_preview(out_dir=out_dir)
         lines.append(f'\n主题预览拼版图(每主题同一组迷你柱状图):{path}')

@@ -1,11 +1,7 @@
-"""共享 fixtures:动画测试轻量化。
-
-48 帧全尺寸动画渲染是全量测试耗时的大头;默认把 core.FRAMES 降到 8 帧,
-需要真实帧数做逐帧断言的专项测试,给参数加 full_animation 选择退出。
-"""
+"""共享 fixtures:动画默认降到 8 帧,full_animation 标记选择退出轻量化。"""
 import pytest
 
-from chartmove import core
+from chartmove.graph import render
 
 LIGHT_FRAMES = 8
 
@@ -19,7 +15,7 @@ def full_animation():
 def _light_animation(request, monkeypatch):
     if 'full_animation' in request.fixturenames:
         return
-    monkeypatch.setattr(core, 'FRAMES', LIGHT_FRAMES)
+    monkeypatch.setattr(render, 'FRAMES', LIGHT_FRAMES)
 
 
 # 进度显示稀疏化:pytest 失败/跳过/xfail 仍逐个显示;-v 等详细模式完全交还原生输出。

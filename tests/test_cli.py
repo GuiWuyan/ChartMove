@@ -1,8 +1,4 @@
-"""验收测试:每种图表类型一条 CLI 命令出图 + themes 子命令 + 错误处理。
-
-进程内调用 cli.main(argv)(退出码约定:0 成功 / 1 生成失败),
-产物写入 pytest 临时目录并即测即删。
-"""
+"""CLI 验收:每类型一条命令出图 + themes 子命令 + 错误处理(即测即删)。"""
 from __future__ import annotations
 
 import json
@@ -39,6 +35,7 @@ def _expect_file(tmp_path, filename: str) -> None:
     ('rose', ('rose', 't', *PAIRS)),
     ('treemap', ('treemap', 't', *PAIRS)),
     ('waterfall', ('waterfall', 't', 'a=10', 'b=-4', 'c=6')),
+    ('pareto', ('pareto', 't', *PAIRS)),
     ('funnel', ('funnel', 't', *PAIRS)),
     ('combo', ('combo', 't', *PAIRS, '--line', '5,8,6')),
     ('line-multi', ('line-multi', 't', '--categories', 'a,b,c', '--series',
@@ -61,11 +58,51 @@ def _expect_file(tmp_path, filename: str) -> None:
                '--ends', '4,6,9')),
     ('dumbbell', ('dumbbell', 't', '--categories', 'a,b,c', '--series',
                   json.dumps([['2024', [1, 2, 3]], ['2025', [2, 3, 4]]]))),
+    ('sunburst', ('sunburst', 't', '--data',
+                  json.dumps({'水果': {'苹果': 30, '香蕉': 20},
+                              '蔬菜': {'白菜': 10}}))),
 ])
 def test_cli_all_types(name, argv, tmp_path):
-    """验收主体:20 种类型各一条命令出图。"""
+    """验收主体:22 种类型各一条命令出图。"""
     _run(tmp_path, *argv)
     _expect_png(tmp_path, name.replace('-', '_'))
+
+
+def test_bar_multi_stacked_flags(tmp_path):
+    """--stacked / --percent 透传:堆积与百分比堆积柱状图出图。"""
+    _run(tmp_path, 'bar-multi', '堆积', '--categories', 'a,b,c', '--series',
+         json.dumps([['s1', [1, 2, 3]], ['s2', [4, 3, 2]]]), '--stacked')
+    _expect_file(tmp_path, 'bar_multi_堆积.png')
+    _run(tmp_path, 'bar-multi', '占比', '--data',
+         json.dumps({'categories': ['a', 'b'],
+                     'series': {'s1': [1, 2], 's2': [3, 4]}}), '--percent')
+    _expect_file(tmp_path, 'bar_multi_占比.png')
+
+
+def test_area_stacked_flags(tmp_path, capsys):
+    """area 多系列:--series 叠加 / --stacked 堆积 / --file 多数值列自动升级。"""
+    _run(tmp_path, 'area', '叠加', '--categories', 'a,b,c', '--series',
+         json.dumps([['s1', [1, 2, 3]], ['s2', [4, 3, 2]]]))
+    _expect_file(tmp_path, 'area_叠加.png')
+    _run(tmp_path, 'area', '堆积', '--data',
+         json.dumps({'categories': ['a', 'b'],
+                     'series': {'s1': [1, 2], 's2': [3, 4]}}), '--stacked', '--percent')
+    _expect_file(tmp_path, 'area_堆积.png')
+    p = _csv(tmp_path, 'a.csv', '月份,线上,门店\n1月,10,8\n2月,20,12\n')
+    _run(tmp_path, 'area', '自动升级', '--file', str(p), '--stacked')
+    _expect_file(tmp_path, 'area_自动升级.png')
+    assert cli.main(['area', 't', 'a=1', '--stacked', '--out-dir', str(tmp_path)]) == 1
+    assert '需要多系列' in capsys.readouterr().err
+
+
+def test_sunburst_errors(tmp_path, capsys):
+    """sunburst:缺 --data 与误用 --file 都报中文错。"""
+    assert cli.main(['sunburst', 't', '--out-dir', str(tmp_path)]) == 1
+    assert '--data' in capsys.readouterr().err
+    p = _csv(tmp_path, 'h.csv', '父,子,值\n水果,苹果,30\n')
+    assert cli.main(['sunburst', 't', '--file', str(p),
+                     '--out-dir', str(tmp_path)]) == 1
+    assert '不支持 --file' in capsys.readouterr().err
 
 
 def test_bar_horizontal_flag(tmp_path):
@@ -82,16 +119,16 @@ def test_line_band_flag(tmp_path):
 
 
 def test_line_band_args_reach_core(tmp_path, monkeypatch):
-    """回归:--lower/--upper 必须透传给 core.line(曾止步 argparse,区间带静默丢失)。"""
-    from chartmove import core
+    """回归:--lower/--upper 必须透传给 graph.line(曾止步 argparse,区间带静默丢失)。"""
+    from chartmove import graph
     got = {}
-    real = core.line
+    real = graph.line
 
     def spy(title, cats, vals, **kw):
         got.update(kw)
         return real(title, cats, vals, **kw)
 
-    monkeypatch.setattr(core, 'line', spy)  # runner 出图时经 _chart_fn 读 core 属性
+    monkeypatch.setattr(graph, 'line', spy)  # runner 出图时经 _chart_fn 读 graph 属性
     assert cli.main(['line', '预测', '1月=120', '2月=135', '3月=128',
                      '--lower', '112,125,116', '--upper', '128,145,140',
                      '--out-dir', str(tmp_path)]) == 0
@@ -110,15 +147,15 @@ def test_line_band_rejected_for_multi_series_file(tmp_path):
 
 def test_waterfall_no_total_reaches_core(tmp_path, monkeypatch):
     """回归:--no-total 曾是空参数(total=False 与 True 产物逐字节相同)。"""
-    from chartmove import core
+    from chartmove import graph
     got = {}
-    real = core.waterfall
+    real = graph.waterfall
 
     def spy(title, cats, vals, **kw):
         got.update(kw)
         return real(title, cats, vals, **kw)
 
-    monkeypatch.setattr(core, 'waterfall', spy)
+    monkeypatch.setattr(graph, 'waterfall', spy)
     assert cli.main(['waterfall', 't', 'a=10', 'b=-4', 'c=6', '--no-total',
                      '--out-dir', str(tmp_path)]) == 0
     assert got['total'] is False
