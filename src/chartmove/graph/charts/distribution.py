@@ -6,8 +6,8 @@ from pathlib import Path
 import numpy as np
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.lines import Line2D
-from matplotlib.patheffects import Normal
 from matplotlib.patches import Rectangle
+from matplotlib.patheffects import Normal
 
 from ..render import _ease, _render, _stagger
 from ..style import (

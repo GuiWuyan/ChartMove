@@ -6,8 +6,8 @@ from pathlib import Path
 
 from matplotlib.colors import to_rgb
 from matplotlib.lines import Line2D
-from matplotlib.patheffects import Normal
 from matplotlib.patches import Patch, Rectangle
+from matplotlib.patheffects import Normal
 
 from ..render import _ease, _render, _stagger
 from ..style import _has_spread, _legend_bottom, _nf, _squarify, _style, _theme
