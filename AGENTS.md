@@ -4,7 +4,7 @@ chartmove 是中文数据图表生成器:24 种图表,15 套主题分属 4 个�
 
 ## 调用方式
 
-- **CLI**:`chartmove <类型> "标题" [数据] [参数]`,如 `chartmove bar "季度产量" Q1=120 Q2=200`;全部参数看 `chartmove --help` 与 `chartmove bar --help`,数据写法与参数表见 README.md
+- **CLI**:`chartmove <类型> "标题" [数据] [参数]`,如 `chartmove bar "季度产量" Q1=120 Q2=200`;多份 CSV/Excel 各出一张用 `chartmove batch <类型> "通配符或文件..."`(标题模板 `{name}`/`{i}`,默认取文件名);全部参数看 `chartmove --help` 与 `chartmove bar --help`,数据写法与参数表见 README.md
 - **MCP**:工具 `make_chart`(出图)与 `list_themes`(列主题),参数以工具描述为准(英文);数据校验错误以中文 ToolError 返回,按提示改参重试
 - agent 手头有 CSV / Excel 时,`make_chart` 传 `file` 路径直读(优先于内联数据),列约定同 CLI `--file`,不必把整表内联进参数
 - 出图结果 JSON 里的 `path`(绝对路径)即交付物,直接把它交给用户

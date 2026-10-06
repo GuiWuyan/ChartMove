@@ -3,6 +3,7 @@
     chartmove bar "季度产量" Q1=120 Q2=200 Q3=90 --style mckinsey
     chartmove line-multi "对比" --categories 1月,2月,3月 --series series.json
     chartmove sunburst "销售构成" --data '{"水果": {"苹果": 30}}'
+    chartmove batch bar "月报/*.csv" --title "{name}销售概况" --col 销售额
 """
 from __future__ import annotations
 
@@ -26,6 +27,34 @@ from .themes import THEME_DESCS, THEME_LABELS, THEME_PACKS, THEMES
 
 _MULTI_TYPES = ('line-multi', 'bar-multi', 'radar')
 _XY_TYPES = ('scatter', 'bubble')
+
+# (类型名, help, items_help):单图子命令与 batch 共用这份清单
+_CHART_TYPES = (
+    ('bar', '柱状图', '数据 类目=数值,如 Q1=120(或 --data JSON)'),
+    ('line', '单系列折线', '数据 类目=数值(或 --data JSON)'),
+    ('area', '面积图', '数据 类目=数值(或 --data JSON)'),
+    ('pie', '饼图', '数据 类目=数值(或 --data JSON)'),
+    ('donut', '环形图', '数据 类目=数值(或 --data JSON)'),
+    ('rose', '玫瑰图(极坐标柱状)', '数据 类目=数值(或 --data JSON)'),
+    ('treemap', '矩形树图(构成)', '数据 类目=数值(或 --data JSON)'),
+    ('waterfall', '瀑布图(自动补合计柱)', '数据 类目=增减值,如 1月=20'),
+    ('pareto', '帕累托图(降序柱+累计占比线+80%参考线)', '数据 类目=数值'),
+    ('funnel', '漏斗图(自动标逐级转化率)', '数据 类目=数值'),
+    ('combo', '双轴组合图', '柱值 类目=数值(折线值用 --line)'),
+    ('line-multi', '多系列折线', None),
+    ('bar-multi', '多系列柱状图(--stacked 堆积 / --percent 百分比堆积)', None),
+    ('radar', '雷达图', None),
+    ('box', '箱线图', None),
+    ('violin', '小提琴图(分布形态,组内 IQR 与中位数内标)', None),
+    ('scatter', '散点图', None),
+    ('bubble', '气泡图', None),
+    ('hist', '直方图', '原始样本数值,空格分隔(或 --data JSON)'),
+    ('heatmap', '热力图', None),
+    ('gantt', '甘特图', None),
+    ('dumbbell', '哑铃图/坡度图(--slope)', None),
+    ('sankey', '桑基图(左→右流量走向)', None),
+    ('sunburst', '旭日图(两级层级占比,--data 传层级 JSON)', None),
+)
 
 
 def _chart_fn(kind: str):
@@ -411,6 +440,77 @@ _RUNNERS = {
 }
 
 
+# ---------- batch:多份 CSV/Excel 各生成一张同类型图表 ----------
+
+def _expand_files(patterns: list[str]) -> list[Path]:
+    """位置文件参数展开为数据文件列表:存在的路径直接用,否则按通配符匹配
+    (cmd/PowerShell 不展开通配符,由工具内部匹配;排序保证批量顺序稳定,
+    跨模式重复项去重)。"""
+    out: list[Path] = []
+    for pat in patterns:
+        p = Path(pat)
+        if p.is_file():
+            out.append(p)
+            continue
+        base, name = Path(pat).parent, Path(pat).name
+        matched = [m for m in sorted(base.glob(name)) if m.is_file()]
+        if not matched:
+            hint = '通配符未匹配到任何数据文件' if set(pat) & set('*?[') else '找不到数据文件'
+            raise ValueError(f'{hint}: {pat}')
+        out.extend(m for m in matched if m not in out)
+    return out
+
+
+def _prep_batch_args(args, kind: str, file: Path, title: str) -> None:
+    """把 batch 命名空间补成单图 runner 可用的形态:数据源与标题逐文件覆写,
+    未上收到 batch 参数面的类型专属参数落为单图默认值(--stacked/--percent
+    已是 batch 参数,其余 v1 不透传)。"""
+    args.file = str(file)
+    args.title = title
+    args.data = None
+    args.items = []
+    args.out = None
+    args.type = kind            # scatter/bubble 的 runner 以 args.type 区分
+    args.horizontal = False
+    args.lower = args.upper = None
+    args.no_total = False
+    args.bar_name, args.line_name = '柱状', '折线'
+    args.no_value_labels = False
+    args.trend = False
+    args.bins = '10'
+    args.no_annotate = False
+    args.sample = None
+    args.x = args.y = args.labels = args.sizes = None
+    args.series = None
+    args.categories = args.starts = args.ends = None
+    args.slope = False
+
+
+def _run_batch(args) -> int:
+    kind = args.type
+    if kind == 'sunburst':
+        raise ValueError('sunburst 需要层级 JSON(--data),没有按数据文件批量的形态')
+    files = _expand_files(args.files)
+    tmpl = args.title or '{name}'
+    total, ok, fail = len(files), 0, 0
+    for i, f in enumerate(files, 1):
+        title = tmpl.replace('{name}', f.stem).replace('{i}', str(i))
+        _prep_batch_args(args, kind, f, title)
+        try:
+            result = _RUNNERS.get(kind, _default_run)(kind, args)
+            ok += 1
+            print(f'[{i}/{total}] {result.name} √')
+        except (ValueError, RuntimeError, OSError) as e:
+            fail += 1
+            print(f'[{i}/{total}] × {f.name}: {e}', file=sys.stderr)
+            if args.fail_fast:
+                print(f'批量中止(--fail-fast):成功 {ok} / 失败 {fail} / 未处理 {total - i}',
+                      file=sys.stderr)
+                return 1
+    print(f'批量完成:成功 {ok} / 失败 {fail}')
+    return 0 if fail == 0 else 1
+
+
 def _themes_cmd(args) -> int:
     for pack, members in THEME_PACKS.items():
         print(f'{pack}:')
@@ -426,6 +526,33 @@ def _themes_cmd(args) -> int:
 
 # ---------- 命令行组装 ----------
 
+def _add_shared_opts(p, *, out=True, data_src=True) -> None:
+    """单图与 batch 共用的参数面;--out 与 --data/--file 仅单图适用
+    (batch 的数据源是位置参数 files,产物名走 类型_标题 默认规则)。"""
+    p.add_argument('--style', choices=list(THEMES), default='business',
+                   help='主题(默认 business,chartmove themes 可查)')
+    p.add_argument('--animate', action='store_true', help='生成动画(默认 GIF)')
+    p.add_argument('--loop', action='store_true',
+                   help='GIF 无限循环(默认播一遍停在末帧;MP4 循环由播放器决定,不支持)')
+    p.add_argument('--fmt', choices=['png', 'gif', 'mp4', 'pdf', 'tif'], default=None,
+                   help='输出格式;静态默认 png,动画默认 gif')
+    p.add_argument('--out-dir', help='输出目录(默认 CHARTMOVE_OUT_DIR 或 ./Results/)')
+    if out:
+        p.add_argument('--out', help='输出文件名(不含扩展名),默认 类型_标题')
+    p.add_argument('--dpi', type=float, help='分辨率(默认静态 150 / tif 600 / GIF 75)')
+    p.add_argument('--figsize', help='画幅 宽x高,如 12.8x7.2')
+    p.add_argument('--numfmt', choices=['auto', 'plain', 'percent'], default='auto',
+                   help="数值标签/刻度格式:auto 万/亿(默认)/ plain 原样 / percent 追加 %%")
+    p.add_argument('--note', help='底部脚注(数据来源 / 备注)')
+    if data_src:
+        p.add_argument('--data', help='JSON 入参(内联字符串或文件路径),可替代位置数据')
+        p.add_argument('--file', help='CSV / Excel 数据文件(.csv/.xlsx,首行为表头;'
+                                       '第 1 列类目,其余列数值,多数值列 bar/line 自动转多系列)')
+    p.add_argument('--cat-col', help='--file 的类目列(表头名或从 1 数的序号,默认第 1 列)')
+    p.add_argument('--col', help='--file 挑选 1 个数值列(表头名或序号;默认除类目列外全部)')
+    p.add_argument('--sheet', help='--file 的 Excel 工作表(名称或从 1 数的序号,默认第一个)')
+
+
 def _build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog='chartmove', description='中文数据图表生成器(默认输出 ./Results/)')
@@ -434,54 +561,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument('title', help='图表标题')
-    common.add_argument('--style', choices=list(THEMES), default='business',
-                        help='主题(默认 business,chartmove themes 可查)')
-    common.add_argument('--animate', action='store_true', help='生成动画(默认 GIF)')
-    common.add_argument('--loop', action='store_true',
-                        help='GIF 无限循环(默认播一遍停在末帧;MP4 循环由播放器决定,不支持)')
-    common.add_argument('--fmt', choices=['png', 'gif', 'mp4', 'pdf', 'tif'], default=None,
-                        help='输出格式;静态默认 png,动画默认 gif')
-    common.add_argument('--out-dir', help='输出目录(默认 CHARTMOVE_OUT_DIR 或 ./Results/)')
-    common.add_argument('--out', help='输出文件名(不含扩展名),默认 类型_标题')
-    common.add_argument('--dpi', type=float, help='分辨率(默认静态 150 / tif 600 / GIF 75)')
-    common.add_argument('--figsize', help='画幅 宽x高,如 12.8x7.2')
-    common.add_argument('--numfmt', choices=['auto', 'plain', 'percent'], default='auto',
-                        help="数值标签/刻度格式:auto 万/亿(默认)/ plain 原样 / percent 追加 %%")
-    common.add_argument('--note', help='底部脚注(数据来源 / 备注)')
-    common.add_argument('--data', help='JSON 入参(内联字符串或文件路径),可替代位置数据')
-    common.add_argument('--file', help='CSV / Excel 数据文件(.csv/.xlsx,首行为表头;'
-                                       '第 1 列类目,其余列数值,多数值列 bar/line 自动转多系列)')
-    common.add_argument('--cat-col', help='--file 的类目列(表头名或从 1 数的序号,默认第 1 列)')
-    common.add_argument('--col', help='--file 挑选 1 个数值列(表头名或序号;默认除类目列外全部)')
-    common.add_argument('--sheet', help='--file 的 Excel 工作表(名称或从 1 数的序号,默认第一个)')
+    _add_shared_opts(common)
 
     sps = {}
-    for name, text, items_help in (
-        ('bar', '柱状图', '数据 类目=数值,如 Q1=120(或 --data JSON)'),
-        ('line', '单系列折线', '数据 类目=数值(或 --data JSON)'),
-        ('area', '面积图', '数据 类目=数值(或 --data JSON)'),
-        ('pie', '饼图', '数据 类目=数值(或 --data JSON)'),
-        ('donut', '环形图', '数据 类目=数值(或 --data JSON)'),
-        ('rose', '玫瑰图(极坐标柱状)', '数据 类目=数值(或 --data JSON)'),
-        ('treemap', '矩形树图(构成)', '数据 类目=数值(或 --data JSON)'),
-        ('waterfall', '瀑布图(自动补合计柱)', '数据 类目=增减值,如 1月=20'),
-        ('pareto', '帕累托图(降序柱+累计占比线+80%参考线)', '数据 类目=数值'),
-        ('funnel', '漏斗图(自动标逐级转化率)', '数据 类目=数值'),
-        ('combo', '双轴组合图', '柱值 类目=数值(折线值用 --line)'),
-        ('line-multi', '多系列折线', None),
-        ('bar-multi', '多系列柱状图(--stacked 堆积 / --percent 百分比堆积)', None),
-        ('radar', '雷达图', None),
-        ('box', '箱线图', None),
-        ('violin', '小提琴图(分布形态,组内 IQR 与中位数内标)', None),
-        ('scatter', '散点图', None),
-        ('bubble', '气泡图', None),
-        ('hist', '直方图', '原始样本数值,空格分隔(或 --data JSON)'),
-        ('heatmap', '热力图', None),
-        ('gantt', '甘特图', None),
-        ('dumbbell', '哑铃图/坡度图(--slope)', None),
-        ('sankey', '桑基图(左→右流量走向)', None),
-        ('sunburst', '旭日图(两级层级占比,--data 传层级 JSON)', None),
-    ):
+    for name, text, items_help in _CHART_TYPES:
         sp = sub.add_parser(name, parents=[common], help=text, description=text)
         if items_help:
             sp.add_argument('items', nargs='*', help=items_help)
@@ -541,6 +624,24 @@ def _build_parser() -> argparse.ArgumentParser:
     sps['line'].add_argument('--lower',
                              help='区间带下界,逗号分隔(与 --upper 成对使用)')
     sps['line'].add_argument('--upper', help='区间带上界,逗号分隔')
+
+    batch_sp = sub.add_parser('batch',
+                              help='批量出图:每份 CSV/Excel 各生成一张同类型图表')
+    batch_sp.add_argument('type', metavar='类型', choices=[n for n, _, _ in _CHART_TYPES],
+                          help='图表类型(同单图;sunburst 需层级 JSON,不适用批量)')
+    batch_sp.add_argument('files', nargs='+', metavar='文件',
+                          help='CSV/Excel 路径或通配符,如 "月报/*.csv"'
+                               '(cmd/PowerShell 不展开通配符,由工具内部匹配)')
+    _add_shared_opts(batch_sp, out=False, data_src=False)
+    batch_sp.add_argument('--title',
+                          help='标题模板:{name}=文件名、{i}=序号(从 1 起),默认 "{name}"')
+    batch_sp.add_argument('--fail-fast', action='store_true',
+                          help='遇错即停(默认逐份继续,最后汇总成败)')
+    batch_sp.add_argument('--stacked', action='store_true',
+                          help='堆积多系列(area / bar-multi;堆积折线图 = area --stacked)')
+    batch_sp.add_argument('--percent', action='store_true',
+                          help='百分比堆积,每类目归一 100%%(隐含 --stacked;同单图)')
+    batch_sp.set_defaults(func=_run_batch)
 
     themes_sp = sub.add_parser('themes', help='列出全部主题(按风格包)')
     themes_sp.add_argument('--preview', action='store_true',
