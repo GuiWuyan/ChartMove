@@ -75,6 +75,16 @@ chartmove themes                                  # 查看 15 套主题(分属 4
 chartmove themes --preview                        # 另出主题预览拼版图(PNG)
 ```
 
+**批量出图**(`batch` 子命令):每份 CSV / Excel 各生成一张同类型图表,标题默认取文件名,通用参数(`--style` / `--fmt` / `--col` / `--numfmt` / `--note` 等)与单图一致、作用于每一张:
+
+```bash
+chartmove batch bar "月报/*.csv" --col 销售额                      # 通配符批量(cmd/PowerShell 不展开,由工具内部匹配)
+chartmove batch bar "月报/*.csv" --title "{name}销售概况" --style mckinsey   # 标题模板:{name}=文件名、{i}=序号(从 1 起)
+chartmove batch line "数据/*.xlsx" --sheet 1 --fmt pdf            # Excel 混批,逐张出矢量 PDF
+```
+
+进度逐张打印(`[2/12] bar_3月销售.png √`);单份失败不拖累其余——失败行进 stderr 并注明原因,结束时汇总 `批量完成:成功 X / 失败 Y`,有失败则退出码 1,`--fail-fast` 改为遇错即停。同名产物按既有规则自动加序号不覆盖;`sunburst` 需层级 JSON,不适用批量。
+
 ## MCP Server(AI / agent 接入)
 
 stdio 传输,工具面收敛为 2 个;工具描述为英文(LLM 选工具靠它),数据校验错误以中文 `ToolError` 返回。

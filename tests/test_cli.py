@@ -382,3 +382,56 @@ def test_file_multi_col_rejects_without_select(tmp_path, capsys):
     p = _csv(tmp_path, 'f.csv', '类目,a,b\nx,1,2\ny,3,4\n')
     assert cli.main(['pie', 't', '--file', str(p), '--out-dir', str(tmp_path)]) == 1
     assert '--col' in capsys.readouterr().err
+
+
+# ---------- batch 子命令:多份 CSV/Excel 各出一张 ----------
+
+def test_batch_glob_one_chart_per_file(tmp_path):
+    """batch:通配符匹配多份 CSV,每份一张图,标题默认取文件名。"""
+    for name in ('朝阳', '海淀', '丰台'):
+        _csv(tmp_path, f'{name}.csv', '门店,销售额\nA,120\nB,200\n')
+    assert cli.main(['batch', 'bar', str(tmp_path / '*.csv'), '--col', '销售额',
+                     '--out-dir', str(tmp_path)]) == 0
+    for name in ('朝阳', '海淀', '丰台'):
+        _expect_file(tmp_path, f'bar_{name}.png')
+
+
+def test_batch_title_template_and_explicit_paths(tmp_path):
+    """--title 模板 {i}/{name};显式列多个文件(不经通配符)同样逐份出图。"""
+    a = _csv(tmp_path, '1月.csv', '类目,值\na,1\n')
+    b = _csv(tmp_path, '2月.csv', '类目,值\na,2\n')
+    assert cli.main(['batch', 'bar', str(a), str(b), '--title', '{i}_{name}销量',
+                     '--out-dir', str(tmp_path)]) == 0
+    _expect_file(tmp_path, 'bar_1_1月销量.png')
+    _expect_file(tmp_path, 'bar_2_2月销量.png')
+
+
+def test_batch_failure_summary_exit_1(tmp_path, capsys):
+    """单份失败不拖累其余:失败行进 stderr,最后汇总并以退出码 1 报告。"""
+    _csv(tmp_path, '坏.csv', '类目\na\nb\n')          # 无数值列
+    _csv(tmp_path, '好.csv', '类目,值\na,1\n')
+    assert cli.main(['batch', 'pie', f'{tmp_path}/*.csv',
+                     '--out-dir', str(tmp_path)]) == 1
+    captured = capsys.readouterr()
+    assert '×' in captured.err and '批量完成:成功 1 / 失败 1' in captured.out
+    _expect_file(tmp_path, 'pie_好.png')
+
+
+def test_batch_fail_fast_stops_early(tmp_path, capsys):
+    """--fail-fast:首份失败即中止,后续文件不再出图。"""
+    _csv(tmp_path, '坏.csv', '类目\na\n')
+    _csv(tmp_path, '好.csv', '类目,值\na,1\n')
+    assert cli.main(['batch', 'bar', f'{tmp_path}/*.csv', '--fail-fast',
+                     '--out-dir', str(tmp_path)]) == 1
+    err = capsys.readouterr().err
+    assert '批量中止' in err
+    assert not (tmp_path / 'bar_好.png').exists()
+
+
+def test_batch_no_match_and_sunburst_rejected(tmp_path, capsys):
+    """通配符零命中与 sunburst 不适用批量,都报中文错、退出码 1。"""
+    assert cli.main(['batch', 'bar', f'{tmp_path}/*.csv',
+                     '--out-dir', str(tmp_path)]) == 1
+    assert '未匹配到' in capsys.readouterr().err
+    assert cli.main(['batch', 'sunburst', 'x.json', '--out-dir', str(tmp_path)]) == 1
+    assert '层级' in capsys.readouterr().err
