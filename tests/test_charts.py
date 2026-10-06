@@ -8,6 +8,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
+from matplotlib import patheffects
+from matplotlib.colors import to_rgba
 from PIL import Image
 
 from chartmove import (
@@ -31,9 +33,11 @@ from chartmove import (
     pie,
     radar,
     rose,
+    sankey,
     scatter,
     sunburst,
     treemap,
+    violin,
     waterfall,
 )
 from chartmove.graph.charts.categorical import (
@@ -42,15 +46,20 @@ from chartmove.graph.charts.categorical import (
     _pareto_draw,
     _waterfall_draw,
 )
-from chartmove.graph.charts.composition import _pie_like_draw, _sunburst_draw
+from chartmove.graph.charts.composition import (
+    _pie_like_draw,
+    _sunburst_draw,
+    _treemap_draw,
+)
 from chartmove.graph.charts.distribution import (
     _box_draw,
     _bubble_draw,
     _heatmap_draw,
     _hist_draw,
     _scatter_draw,
+    _violin_draw,
 )
-from chartmove.graph.charts.flow import _funnel_draw
+from chartmove.graph.charts.flow import _funnel_draw, _sankey_draw, _sankey_layout
 from chartmove.graph.charts.trend import (
     _area_draw,
     _combo_draw,
@@ -92,6 +101,9 @@ CASES: dict[str, tuple] = {
     'box': (box, dict(series=[('组A', [3, 5, 4, 6, 7, 5, 4]),
                               ('组B', [8, 9, 7, 10, 6, 9, 8]),
                               ('组C', [2, 3, 2, 4, 3, 5, 2])])),
+    'violin': (violin, dict(series=[('组A', [3, 5, 4, 6, 7, 5, 4, 8]),
+                                    ('组B', [8, 9, 7, 10, 6, 9, 8, 11]),
+                                    ('组C', [2, 3, 2, 4, 3, 5, 2, 1])])),
     'heatmap': (heatmap, dict(rows=['周一', '周二', '周三', '周四'],
                               cols=['上午', '中午', '下午', '晚间'], values=MATRIX)),
     'waterfall': (waterfall, dict(categories=CATS, values=[120, -30, 50, -20])),
@@ -103,6 +115,9 @@ CASES: dict[str, tuple] = {
     'dumbbell': (dumbbell, dict(categories=CATS, series=SERIES, slope=True)),
     'sunburst': (sunburst, dict(hierarchy=HIERARCHY)),
     'pareto': (pareto, dict(SINGLE)),
+    'sankey': (sankey, dict(links=[['工资', '生活开支', 8000], ['工资', '储蓄', 4000],
+                                   ['副业', '储蓄', 1500], ['工资', '房租', 3000],
+                                   ['储蓄', '基金定投', 3000], ['储蓄', '应急金', 2500]])),
 }
 
 
@@ -237,15 +252,19 @@ def _stability_draws() -> dict:
         'bubble': lambda: _bubble_draw('t', xs, ys, [10, 40, 5, 25, 35, 15], th),
         'hist': lambda: _hist_draw('t', [68, 72, 70, 75, 77, 80, 82, 85], 8, th),
         'box': lambda: _box_draw('t', [('组A', [3, 5, 4, 6, 7]), ('组B', [8, 9, 7])], th),
+        'violin': lambda: _violin_draw('t', [('组A', np.array([3, 5, 4, 6, 7])),
+                                             ('组B', np.array([8, 9, 7, 10, 6]))], th),
         'waterfall': lambda: _waterfall_draw('t', cats, vals, th),
         'funnel': lambda: _funnel_draw('t', ['访问', '加购'], [1000, 420], th),
         'pareto': lambda: _pareto_draw('t', cats, vals, th),
+        'sankey': lambda: _sankey_draw('t', [('A', 'C', 30), ('B', 'D', 20),
+                                             ('C', 'E', 10)], th),
     }
 
 
 def test_axes_limits_stable_during_animation():
     """动画期间坐标轴固定:逐元素出现的图(散点/气泡/箱线/折线等)轴不得随数据扩张滑动。"""
-    fig, axes = plt.subplots(2, 7, figsize=(21, 6))
+    fig, axes = plt.subplots(3, 5, figsize=(17, 9))
     try:
         for ax, (name, build) in zip(axes.flat, _stability_draws().items()):
             draw = build()
@@ -498,6 +517,35 @@ def test_bar_multi_percent_labels():
         plt.close(fig)
 
 
+def test_in_area_labels_override_sketch_stroke():
+    """sketch 的 rc 白描边会把色块内白字糊死(2026-10-05 修复):treemap 格内、
+    旭日图内环、热力图标注、百分比堆积段内四处的白色文字必须显式以
+    patheffects.Normal 覆盖 rc。注意 get_path_effects() 未显式设置时会回退
+    返回 rc 效果,故断言效果类型而非非空——删掉覆盖本测试即红。"""
+    th = _theme('sketch')
+    fig, ax = plt.subplots()
+    try:
+        draws = [
+            _treemap_draw('t', CATS, VALS, th),
+            _sunburst_draw('t', [('线上', [('直营', 40), ('分销', 25)]),
+                                 ('门店', [('直营', 20), ('加盟', 15)])], th),
+            _heatmap_draw('t', ['r1', 'r2'], ['c1', 'c2', 'c3'],
+                          np.array([[1, 9, 2], [3, 5, 4]]), th),
+            _bar_multi_draw('t', CATS, SERIES, th, percent=True),
+        ]
+        for draw in draws:
+            ax.clear()
+            draw(ax, 1.0)
+            whites = [t for t in ax.texts
+                      if to_rgba(t.get_color())[:3] == (1.0, 1.0, 1.0)]
+            assert whites, '应存在色块内白字,否则此测试失去意义'
+            for t in whites:
+                assert [type(e) for e in t.get_path_effects()] == [patheffects.Normal], \
+                    f'白字 {t.get_text()!r} 未覆盖 sketch 的 rc 白描边,会糊成一团'
+    finally:
+        plt.close(fig)
+
+
 def test_pie_value_not_duplicated():
     """回归:饼图数值曾在外标签与扇区内重复出现(图例再列一遍类目)。
     修复后数值只保留在外标签,<6% 的小扇区也不丢数。"""
@@ -525,8 +573,8 @@ def test_donut_show_values_false():
 
 
 def test_theme_metadata():
-    """13 主题分 4 包;每个主题都有中文名与一句话描述,包成员无遗漏无重复。"""
-    assert len(THEMES) == 13
+    """15 主题分 4 包;每个主题都有中文名与一句话描述,包成员无遗漏无重复。"""
+    assert len(THEMES) == 15
     assert sorted(THEME_PACKS) == ['其他风格包', '商务包', '学术包', '简约演示包']
     packed = [k for members in THEME_PACKS.values() for k in members]
     assert sorted(packed) == sorted(THEMES)
@@ -617,9 +665,94 @@ def test_box_empty_samples():
         box('t', [('组A', [1, 2]), ('组B', [])])
 
 
+def test_violin_kde_validation():
+    """小提琴图校验契约:每组需 ≥2 个不同取值(零方差会让 gaussian KDE 裸穿英文异常)。"""
+    with pytest.raises(ValueError, match='2 个不同的取值'):
+        violin('t', [('组A', [5, 5, 5])])
+    with pytest.raises(ValueError, match='2 个不同的取值'):
+        violin('t', [('组A', [5])])
+
+
+def test_violin_draws_bodies_and_inner():
+    """小提琴绘制:KDE 体 + 组内 IQR 线与中位数点;p=0 无体但轴已钉死。"""
+    from matplotlib.collections import PolyCollection
+    fig, ax = plt.subplots()
+    try:
+        draw = _violin_draw('t', [('组A', np.array([3.0, 5, 4, 6, 7])),
+                                  ('组B', np.array([8.0, 9, 7, 10, 6]))],
+                            _theme('business'))
+        draw(ax, 0.0)
+        assert not ax.collections
+        assert ax.get_xlim() == (0.5, 2.5)  # x 轴首帧即最终范围
+        ax.clear()
+        draw(ax, 1.0)
+        bodies = [c for c in ax.collections if isinstance(c, PolyCollection)]
+        assert len(bodies) == 2
+        assert len(ax.lines) == 2  # 两组 IQR 线
+        from matplotlib.collections import PathCollection
+        dots = [c for c in ax.collections
+                if isinstance(c, PathCollection) and len(c.get_offsets()) == 1]
+        assert len(dots) == 2  # 每组一个中位数点
+    finally:
+        plt.close(fig)
+
+
 def test_funnel_negative_rejected():
     with pytest.raises(ValueError, match='漏斗图'):
         funnel('t', ['a', 'b'], [10, -5])
+
+
+def test_sankey_layout_and_validation(tmp_path):
+    """桑基:最长路径分列 + 缎带锚点在节点范围内;循环/自环/非正流量/坏形状全拒;
+    动画(缎带从源向目标生长)出 GIF。"""
+    links = [['工资', '生活开支', 8000], ['工资', '储蓄', 4000],
+             ['副业', '储蓄', 1500], ['储蓄', '基金定投', 3000], ['储蓄', '应急金', 2500]]
+    nodes, recs = _sankey_layout(links)
+    assert nodes['工资']['col'] == 0 and nodes['副业']['col'] == 0
+    assert nodes['储蓄']['col'] == 1
+    assert nodes['基金定投']['col'] == 2 and nodes['应急金']['col'] == 2
+    assert nodes['储蓄']['val'] == 5500  # max(入流 5500, 出流 5500)
+    for r in recs:
+        s_nd, t_nd = nodes[r['s']], nodes[r['t']]
+        assert s_nd['bot'] <= r['sy1'] < r['sy0'] <= s_nd['top']   # 锚点在源节点内
+        assert t_nd['bot'] <= r['ty1'] < r['ty0'] <= t_nd['top']   # 锚点在目标节点内
+    path, warns = _render(sankey, dict(links=links), tmp_path, animate=True, fmt='gif')
+    _assert_ok(path, 'gif', warns)
+    with pytest.raises(ValueError, match='循环流向'):
+        sankey('t', [['A', 'B', 10], ['B', 'C', 5], ['C', 'A', 8]])
+    with pytest.raises(ValueError, match='指向自身'):
+        sankey('t', [['A', 'A', 10]])
+    with pytest.raises(ValueError, match='需 > 0'):
+        sankey('t', [['A', 'B', -3]])
+    with pytest.raises(ValueError, match='每项需为'):
+        sankey('t', [['A', 'B']])
+    with pytest.raises(ValueError, match='不能为空'):
+        sankey('t', [])
+
+
+def test_sankey_node_colors():
+    """桑基配色:全部节点取色板(按列内位置轮换),缎带继承源节点色;
+    缎带透明度按"左右端高低次序互换"分层——互换即中段交叠,越多越透明。"""
+    from matplotlib.patches import Polygon as _Poly
+    from matplotlib.patches import Rectangle as _Rect
+    fig, ax = plt.subplots()
+    try:
+        th = _theme('business')
+        # 2×2 全连接:A→Y 与 B→X 次序互换(必交叉),A→X 与 B→Y 顺序保持
+        draw = _sankey_draw('t', [('A', 'X', 30), ('A', 'Y', 20),
+                                  ('B', 'X', 30), ('B', 'Y', 20)], th)
+        draw(ax, 1.0)
+        palette = {tuple(to_rgba(c)) for c in th['palette']}
+        rects = [p for p in ax.patches if isinstance(p, _Rect)]
+        cols = [tuple(to_rgba(r.get_facecolor())) for r in rects]
+        assert set(cols) <= palette  # 全部节点都是色板色
+        assert cols[0] == cols[2]    # 两列同位置节点轮换到同一色(A、X 各列第 0 位)
+        assert cols[1] == cols[3]
+        assert cols[0] != cols[1]    # 同列相邻位置颜色不同
+        polys = [p for p in ax.patches if isinstance(p, _Poly)]
+        assert len({round(p.get_alpha(), 3) for p in polys}) >= 2  # 透明度分层生效
+    finally:
+        plt.close(fig)
 
 
 def test_negative_values_rejected():
@@ -739,6 +872,8 @@ def test_nan_inf_rejected():
         scatter('t', [1, float('inf')], [1, 2])
     with pytest.raises(ValueError, match='nan'):
         box('t', [('组A', [1, float('nan')])])
+    with pytest.raises(ValueError, match='nan'):
+        violin('t', [('组A', [1, float('nan')])])
     with pytest.raises(ValueError, match='nan'):
         heatmap('t', ['r'], ['c'], [[float('nan')]])
     with pytest.raises(ValueError, match='nan'):

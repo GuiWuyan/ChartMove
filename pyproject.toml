@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "chartmove"
 dynamic = ["version"]
-description = "中文数据图表生成器:22 种图表、13 套主题分属 4 风格包,输出 PNG/PDF/TIF/GIF/MP4,CLI 与 MCP 双入口"
+description = "中文数据图表生成器:24 种图表、15 套主题分属 4 风格包,输出 PNG/PDF/TIF/GIF/MP4,CLI 与 MCP 双入口"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]

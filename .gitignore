@@ -15,3 +15,6 @@ __pycache__/
 .ruff_cache/
 /Results/
 /config.json
+/.dsh_probe/
+/docs/
+/pytest-of-Huawei/

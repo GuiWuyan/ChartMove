@@ -12,13 +12,22 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 from ._version import __version__
-from .table import file_box_groups, file_columns, file_matrix, file_samples, file_xy, parse_float
+from .table import (
+    file_box_groups,
+    file_columns,
+    file_links,
+    file_matrix,
+    file_samples,
+    file_xy,
+    parse_float,
+)
 from .themes import THEME_DESCS, THEME_LABELS, THEME_PACKS, THEMES
 
 ChartType = Literal[
     'bar', 'line', 'line-multi', 'area', 'pie', 'donut', 'combo', 'bar-multi',
-    'radar', 'scatter', 'bubble', 'hist', 'box', 'heatmap', 'waterfall', 'funnel',
-    'rose', 'treemap', 'gantt', 'dumbbell', 'sunburst', 'pareto']
+    'radar', 'scatter', 'bubble', 'hist', 'box', 'violin', 'heatmap', 'waterfall',
+    'funnel', 'rose', 'treemap', 'gantt', 'dumbbell', 'sankey', 'sunburst',
+    'pareto']
 Fmt = Literal['png', 'pdf', 'tif', 'gif', 'mp4']
 
 
@@ -38,7 +47,7 @@ server = MCPServer(
     name='chartmove',
     version=__version__,
     instructions=(
-        'Chinese chart generator: 22 chart types x 13 themes, no font configuration '
+        'Chinese chart generator: 24 chart types x 15 themes, no font configuration '
         'needed, output is a persistent file. Use list_themes to discover styles. '
         'Call make_chart with inline data or a CSV/Excel file path (file param); '
         'the returned "path" (absolute path to the image file) IS the deliverable - '
@@ -87,10 +96,12 @@ def _bins(bins):
         'Generate a chart image with Chinese fonts preconfigured. '
         'Returns JSON string: {path (absolute path, THE deliverable), file_size, '
         'type, style, animated}. Data params by type - '
-        'category charts (bar/line/line-multi/area/pie/donut/combo/bar-multi/radar/'
+        'category charts (bar/line/line-multi/area/pie/donut/combo/bar-multi/'
         'rose/treemap/waterfall/funnel): categories + values, or '
         'series=[[name, [values]], ...] '
         'for multi-series (combo also needs line_values); '
+        'radar: categories + series=[[name, [values]], ...] (values alone '
+        'is rejected); '
         'bar-multi: stacked=true stacks the series vertically, percent=true '
         'normalizes each category to 100% (implies stacked); '
         'area with series: multi-series by default translucent overlaid, '
@@ -104,12 +115,17 @@ def _bins(bins):
         'gantt: categories (task names) + starts + ends (numeric units); '
         'dumbbell: series with EXACTLY 2 entries (before/after), '
         'slope=true switches to a slope chart; '
+        'sankey: links = [[source, target, value], ...] (each item may also be '
+        'a {source, target, value} dict); flows left to right, node height = '
+        'flow volume, cycles and non-positive values are rejected; '
         'line accepts lower + upper (same length as values) to draw a '
         'semi-transparent prediction/confidence band; '
         'scatter/bubble: x + y (+sizes for bubble, +labels optional); '
         'hist: values = raw samples, bins is an int, "auto", or a strictly '
         'increasing edge array (e.g. [1,10,20]); '
         'box: series = [[group_name, [samples]], ...]; '
+        'violin: same series shape, KDE density shape per group with inner '
+        'IQR bar + median dot, needs >=2 distinct values per group; '
         'heatmap: rows + cols + matrix (2-D numeric). '
         'file (optional): path to a CSV/Excel file (.csv/.xlsx, first row = header) '
         'to read data from - takes precedence over inline data params. '
@@ -122,7 +138,8 @@ def _bins(bins):
         'area with >=2 value columns; pie/donut/rose/waterfall/funnel need col '
         'to pick one); '
         'combo: 1st value col = bars, 2nd = line; '
-        'box: every column = one group of raw samples; '
+        'box/violin: every column = one group of raw samples; '
+        'sankey: 3 columns = source, target, value; '
         'scatter/bubble: columns x, y (, sizes) (, labels); '
         'hist: 1st column = raw samples; '
         'heatmap: 1st column = row names, remaining columns = matrix. '
@@ -173,6 +190,7 @@ def make_chart(
     ends: list[float] | None = None,
     slope: bool = False,
     hierarchy: dict[str, dict[str, float]] | list | None = None,
+    links: list | None = None,
     numfmt: Literal['auto', 'plain', 'percent'] = 'auto',
     note: str | None = None,
     file: str | None = None,
@@ -235,10 +253,10 @@ def make_chart(
                 return _result(_chart_fn(type)(title, categories,
                                                _norm_series(series), **extra, **common),
                                type, style, animate)
-            if type == 'box':
+            if type in ('box', 'violin'):
                 _require(series is not None,
-                         'box 需要 series=[[组名, [样本...]], ...]')
-                return _result(_chart_fn('box')(title, _norm_series(series), **common),
+                         f'{type} 需要 series=[[组名, [样本...]], ...]')
+                return _result(_chart_fn(type)(title, _norm_series(series), **common),
                                type, style, animate)
             if type in _XY_TYPES:
                 _require(x is not None and y is not None, 'scatter/bubble 需要 x 与 y')
@@ -274,6 +292,16 @@ def make_chart(
                          f'dumbbell 需要恰好 2 个系列(期初/期末),收到 {len(ss)} 个')
                 return _result(_chart_fn('dumbbell')(title, categories, ss,
                                                      slope=slope, **common),
+                               type, style, animate)
+            if type == 'sankey':
+                _require(links is not None,
+                         'sankey 需要 links=[[源, 目标, 数值], ...]')
+                return _result(_chart_fn('sankey')(title, links, **common),
+                               type, style, animate)
+            if type == 'sankey':
+                _require(links is not None,
+                         'sankey 需要 links=[[源, 目标, 数值], ...]')
+                return _result(_chart_fn('sankey')(title, links, **common),
                                type, style, animate)
             if type == 'sunburst':
                 _require(hierarchy is not None,
@@ -344,8 +372,8 @@ def _from_file(type, title, file, cat_col, col, sheet, common, *, horizontal, tr
         _require(cols, 'file 至少需要 1 列数值')
         extra = {'stacked': stacked, 'percent': percent} if type == 'bar-multi' else {}
         return done(_chart_fn(type)(title, cats, cols, **extra, **common), type)
-    if type == 'box':
-        return done(_chart_fn('box')(title, file_box_groups(file, sheet), **common),
+    if type in ('box', 'violin'):
+        return done(_chart_fn(type)(title, file_box_groups(file, sheet), **common),
                     type)
     if type == 'hist':
         return done(_chart_fn('hist')(title, file_samples(file, sheet),
@@ -375,6 +403,9 @@ def _from_file(type, title, file, cat_col, col, sheet, common, *, horizontal, tr
                  f'dumbbell 的 file 需要 2 列数值(期初、期末),收到 {len(cols)} 列')
         return done(_chart_fn('dumbbell')(title, cats, [cols[0], cols[1]],
                                           slope=slope, **common), type)
+    if type == 'sankey':
+        return done(_chart_fn('sankey')(title, file_links(file, sheet), **common),
+                    type)
     if type == 'sunburst':
         raise ToolError('sunburst 暂不支持 file 数据(层级数据请用 hierarchy 内联参数)')
     raise ToolError(f'未知图表类型 {type!r},可选:{", ".join(get_args(ChartType))}')
@@ -390,7 +421,7 @@ def _result(path, chart_type: str, style: str, animated: bool) -> str:
 @server.tool(
     name='list_themes',
     description=(
-        'List the 13 available chart styles grouped in 4 packs (academic / business '
+        'List the 15 available chart styles grouped in 4 packs (academic / business '
         '/ minimal-presentation / others). Returns one line per theme: '
         'key (use it as the "style" param of make_chart), Chinese label, '
         'and a one-line description. Default style is "business". '

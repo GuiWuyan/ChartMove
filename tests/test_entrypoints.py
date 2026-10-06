@@ -41,3 +41,12 @@ def test_mcp_server_importable():
     """MCP 入口可导入(登记在 pyproject 的 chartmove-mcp 指向它)。"""
     out = _run([sys.executable, '-c', 'import chartmove.mcp_server'])
     assert out.returncode == 0
+
+
+def test_cli_piped_output_survives_non_utf8_locale():
+    """PLAN §4-3 回归:非中文 locale 下管道输出此前在中文处 UnicodeEncodeError
+    崩溃退出;现在 main 对非 tty 流降级为替换字符,退出码必须仍为 0。"""
+    env = dict(os.environ, PYTHONIOENCODING='cp1252')
+    out = subprocess.run([sys.executable, '-m', 'chartmove.cli', 'themes'],
+                         capture_output=True, env=env, timeout=120)
+    assert out.returncode == 0, out.stderr.decode('utf-8', errors='replace')

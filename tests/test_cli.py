@@ -47,6 +47,8 @@ def _expect_file(tmp_path, filename: str) -> None:
                json.dumps([['s1', [1, 2, 3]]]))),
     ('box', ('box', 't', '--series', json.dumps([['g1', [1, 2, 3, 4]],
                                                  ['g2', [5, 6, 7]]]))),
+    ('violin', ('violin', 't', '--series', json.dumps([['g1', [1, 2, 3, 4]],
+                                                       ['g2', [5, 6, 7]]]))),
     ('scatter', ('scatter', 't', '--x', '1,2,3', '--y', '4,5,6', '--trend',
                  '--labels', '甲,乙,丙')),
     ('bubble', ('bubble', 't', '--x', '1,2', '--y', '3,4', '--sizes', '10,20')),
@@ -61,6 +63,10 @@ def _expect_file(tmp_path, filename: str) -> None:
     ('sunburst', ('sunburst', 't', '--data',
                   json.dumps({'水果': {'苹果': 30, '香蕉': 20},
                               '蔬菜': {'白菜': 10}}))),
+    ('sankey', ('sankey', 't', '--data',
+                json.dumps({'links': [['收入', '支出', 300],
+                                      ['收入', '储蓄', 200],
+                                      ['储蓄', '投资', 120]]}))),
 ])
 def test_cli_all_types(name, argv, tmp_path):
     """验收主体:22 种类型各一条命令出图。"""

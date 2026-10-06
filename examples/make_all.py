@@ -1,4 +1,4 @@
-"""一条命令生成全部类型示例图(22 类型 + 堆积变体,共 25 张),兼任用法文档。
+"""一条命令生成全部类型示例图(24 类型 + 堆积变体,共 27 张),兼任用法文档。
 
     python examples/make_all.py [--animate] [--out-dir D:/tmp/charts]
 默认输出到项目根 ./Results/(按本脚本位置定位,与运行时工作目录无关)。
@@ -28,9 +28,11 @@ from chartmove import (
     pie,
     radar,
     rose,
+    sankey,
     scatter,
     sunburst,
     treemap,
+    violin,
     waterfall,
 )
 
@@ -47,7 +49,7 @@ MATRIX = [[3, 7, 2, 5], [8, 1, 6, 4], [2, 5, 9, 3], [6, 2, 4, 8]]
 
 
 def make_all(out_dir=None, animate=False) -> list:
-    """依次生成 22 种类型 + 3 张堆积变体,主题按序轮换,顺带展示 13 套风格。"""
+    """依次生成 24 种类型 + 3 张堆积变体,主题按序轮换,顺带展示 15 套风格。"""
     styles = list(THEMES)
 
     def at(i):
@@ -109,6 +111,16 @@ def make_all(out_dir=None, animate=False) -> list:
                  slope=True, style=at(23), animate=animate, out_dir=out_dir),
         sunburst('销售构成旭日图', HIERARCHY, style=at(24), animate=animate,
                  out_dir=out_dir),
+        violin('新旧版本响应时长分布', [('新版本', [12, 15, 11, 18, 22, 30, 25, 17, 14,
+                                                    9, 21, 26, 33, 19, 16]),
+                                       ('旧版本', [21, 25, 19, 28, 32, 40, 35, 27, 24,
+                                                   19, 31, 36, 43, 29, 26])],
+               style=at(25), animate=animate, out_dir=out_dir),
+        sankey('月度资金流向', [['月收入', '房租', 4500], ['月收入', '餐饮', 2800],
+                                ['月收入', '储蓄', 3200], ['月收入', '交通', 900],
+                                ['副业', '储蓄', 1500], ['储蓄', '基金定投', 2600],
+                                ['储蓄', '应急备用金', 2100]],
+               style=at(26), animate=animate, out_dir=out_dir),
     ]
 
 

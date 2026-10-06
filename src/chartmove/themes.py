@@ -1,4 +1,4 @@
-"""THEMES 主题库:13 套主题分 4 风格包;THEME_PACKS / THEME_LABELS / THEME_DESCS
+"""THEMES 主题库:15 套主题分 4 风格包;THEME_PACKS / THEME_LABELS / THEME_DESCS
 供 CLI themes 子命令与 MCP list_themes 直接消费。
 可选扩展键:spines('box'/'none')、grid_axis('both')、fig_face(图面底色)、
 sketch(手绘抖动)。"""
@@ -7,8 +7,8 @@ from __future__ import annotations
 # 每包内的顺序即展示顺序
 THEME_PACKS: dict[str, list[str]] = {
     '学术包': ['academic', 'grayscale', 'ggplot', 'colorblind'],
-    '商务包': ['business', 'mckinsey', 'dashboard'],
-    '简约演示包': ['whitegrid', 'minimal', 'morandi'],
+    '商务包': ['business', 'mckinsey', 'dashboard', 'sunset'],
+    '简约演示包': ['whitegrid', 'minimal', 'morandi', 'harvest'],
     '其他风格包': ['sketch', 'terminal', 'cyberpunk'],
 }
 
@@ -20,12 +20,14 @@ THEME_LABELS: dict[str, str] = {
     'business': '商务极简风',
     'mckinsey': '麦肯锡风',
     'dashboard': '深色看板商务风',
+    'sunset': '晚霞风',
     'whitegrid': '白底网格风',
     'minimal': '纯极简无脊线风',
     'morandi': '莫兰迪低饱和风',
+    'harvest': '大地风',
     'sketch': '手绘草图风',
-    'terminal': '暗黑程序员风',
-    'cyberpunk': '赛博朋克霓虹风',
+    'terminal': '极客风',
+    'cyberpunk': '霓虹风',
 }
 
 THEME_DESCS: dict[str, str] = {
@@ -36,9 +38,11 @@ THEME_DESCS: dict[str, str] = {
     'business': '白底浅网格、藏蓝主色,通用商务默认',
     'mckinsey': '无网格多留白、深蓝+灰、红色强调,咨询报告感',
     'dashboard': '深藏青底亮色系,大屏看板高对比',
+    'sunset': '奶油底暖色系、珊瑚橙+琥珀,点缀灰青,营销消费场景',
     'whitegrid': '双向浅网格,seaborn 式清爽通用',
     'minimal': '去边框去网格,黑白灰+红色点睛',
     'morandi': '灰调柔和色系、暖白纸面,优雅耐看',
+    'harvest': '浅米底大地色系、焦糖+橄榄+锈红,沉稳温暖',
     'sketch': 'xkcd 式手绘抖动线条,西文手写体(中文仍用中文字体)',
     'terminal': 'GitHub Dark 底色,代码/技术场景',
     'cyberpunk': '深紫夜底霓虹高饱和,发布会大屏',
@@ -93,6 +97,12 @@ THEMES: dict[str, dict] = {
         face='#101C30', fig_face='#0B1424', text='#E8EEF7', axis='#33415C',
         grid_color='#22314B', grid_ls='-', grid_lw=0.8,
     ),
+    'sunset': dict(
+        palette=('#D95D39', '#E9A820', '#4E8D8C', '#A63D2F', '#7E8F58', '#8C5383'),
+        hi_max='#C0392B', hi_min='#8FA3AD',
+        face='#FFF9F2', fig_face='#FFF9F2', text='#3D2E24', axis='#CDBFAF',
+        grid_color='#F0E4D7', grid_ls='-', grid_lw=0.9,
+    ),
     # ---------- 简约演示包 ----------
     'whitegrid': dict(
         palette=('#4C72B0', '#DD8452', '#55A868', '#C44E52', '#8172B3', '#937860'),
@@ -113,6 +123,12 @@ THEMES: dict[str, dict] = {
         hi_max='#7D6B5D', hi_min='#D8D5D0',
         face='#FAF9F6', text='#5C5C5C', axis='#DDD9D3',
         grid_color='#EBE8E3', grid_ls='-', grid_lw=0.9,
+    ),
+    'harvest': dict(
+        palette=('#C05C3E', '#D9913B', '#8A8B5C', '#6F4E37', '#C4A12E', '#A6768B'),
+        hi_max='#B3402A', hi_min='#B8AC9C',
+        face='#FAF5EC', fig_face='#FAF5EC', text='#4A3B2E', axis='#D8CCB8',
+        grid_color='#EFE7D8', grid_ls='-', grid_lw=0.9,
     ),
     # ---------- 其他风格包 ----------
     'sketch': dict(

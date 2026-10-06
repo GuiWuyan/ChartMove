@@ -142,6 +142,34 @@ def _validate_hierarchy(hierarchy) -> list[tuple[str, list[tuple[str, float]]]]:
     return out
 
 
+def _validate_links(links) -> list[tuple[str, str, float]]:
+    """桑基图 links=[[源, 目标, 数值], ...],每项也接受 {source, target, value} 字典。"""
+    try:
+        items = list(links)
+    except TypeError as e:
+        raise ValueError('links 需为 [[源, 目标, 数值], ...] 列表') from e
+    out = []
+    for item in items:
+        try:
+            if isinstance(item, dict):
+                src, tgt = item['source'], item['target']
+                fv = float(item['value'])
+            else:
+                src, tgt, v = item
+                fv = float(v)
+        except (TypeError, ValueError, KeyError) as e:
+            raise ValueError('links 每项需为 [源, 目标, 数值] 或 '
+                             '{source, target, value} 字典') from e
+        if not math.isfinite(fv):
+            raise ValueError('links 含 nan / inf 等非法数值,请检查数据')
+        if fv <= 0:
+            raise ValueError('桑基图 links 的流量值需 > 0')
+        out.append((str(src), str(tgt), fv))
+    if not out:
+        raise ValueError('links 不能为空')
+    return out
+
+
 def _lttb_indices(ys, target: int) -> list[int]:
     """LTTB 降采样保留索引:保首尾与尖峰,抽到 ~target 个点。"""
     n = len(ys)
