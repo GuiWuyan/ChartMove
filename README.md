@@ -1,13 +1,13 @@
 # Chartmove(chartmove)
 
 **数据图表生成工具** 
-matplotlib 内核,23 种图表,13 套主题分属 4 个风格包,输出 PNG / PDF / TIF / GIF / MP4;入口为 CLI 与 MCP Server(AI / agent 调用)
+matplotlib 内核,24 种图表,15 套主题分属 4 个风格包,输出 PNG / PDF / TIF / GIF / MP4;入口为 CLI 与 MCP Server(AI / agent 调用)
 
 ## 目录结构
 
 ```
 ├─ src/chartmove/     # 包:core 内核 + themes / fonts / output + cli / mcp_server
-├─ tests/            # 23 图 smoke test 矩阵 + CLI / 单元测试
+├─ tests/            # 24 图 smoke test 矩阵 + CLI / 单元测试
 └─ examples/         # make_all.py:一条命令生成全部类型示例图,兼任用法文档
 ```
 
@@ -15,7 +15,7 @@ matplotlib 内核,23 种图表,13 套主题分属 4 个风格包,输出 PNG / PD
 
 命令结构:**`chartmove <类型> "标题" [数据] [通用参数] [类型专属参数]`**,输出文件绝对路径,默认写入 `./Results/`。
 
-23 种类型:`bar` / `line` / `line-multi` / `area` / `pie` / `donut` / `rose` / `treemap` / `combo` / `bar-multi` / `radar` / `scatter` / `bubble` / `hist` / `box` / `violin` / `heatmap` / `waterfall` / `pareto` / `funnel` / `gantt` / `dumbbell` / `sunburst`(多词类型用 kebab-case;`radar` / `box` / `violin` 属多系列/分组样本类型,数据须用 `--series` 或 `--file` 写法,不收 `类目=值`;`chartmove --help` 看总览,`chartmove bar --help` 看单类型全部参数)。
+24 种类型:`bar` / `line` / `line-multi` / `area` / `pie` / `donut` / `rose` / `treemap` / `combo` / `bar-multi` / `radar` / `scatter` / `bubble` / `hist` / `box` / `violin` / `heatmap` / `waterfall` / `pareto` / `funnel` / `gantt` / `dumbbell` / `sankey` / `sunburst`(多词类型用 kebab-case;`radar` / `box` / `violin` 属多系列/分组样本类型,数据须用 `--series` 或 `--file` 写法,不收 `类目=值`;`sankey` 用 `--data` 传 links JSON 或 `--file` 传 3 列表格;`chartmove --help` 看总览,`chartmove bar --help` 看单类型全部参数)。
 
 **数据的四种写法**(按类型任选其一,`--file` 优先级最高):
 
@@ -30,7 +30,7 @@ matplotlib 内核,23 种图表,13 套主题分属 4 个风格包,输出 PNG / PD
 
 | 参数 | 说明 |
 |---|---|
-| `--style` | 13 套主题(分属 4 个风格包),默认 business;`chartmove themes` 列出全部 |
+| `--style` | 15 套主题(分属 4 个风格包),默认 business;`chartmove themes` 列出全部 |
 | `--animate` | 出"数据生长"动画(默认 GIF,`--fmt mp4` 可出 MP4) |
 | `--loop` | 配合 `--animate`:GIF 无限循环(默认播一遍停在末帧;MP4 循环由播放器决定,不支持) |
 | `--fmt` | `png`(静态默认)/ `pdf` 矢量 / `tif` 600dpi / `gif`(动画默认)/ `mp4` |
@@ -61,7 +61,7 @@ matplotlib 内核,23 种图表,13 套主题分属 4 个风格包,输出 PNG / PD
 | `waterfall` | `--no-total` 不追加合计柱 |
 | `heatmap` | `--no-annotate` 不在格子标数值 |
 
-**`--file` 列约定**(CSV / Excel,首行表头;CSV 兼容 UTF-8 与 GBK):默认第 1 列类目、其余列数值,多数值列时 bar/line/area 自动转多系列图(系列名 = 表头;area 配 `--stacked` / `--percent` 出堆积面积),combo 取类目列后两列(柱、线);box / violin 每列一组(表头 = 组名);scatter/bubble 按 x, y(, sizes)(, labels) 取列;heatmap 类目列 = 行名、表头 = 列名;hist 第 1 列为原始样本;宽表用 `--cat-col` / `--col` 选列,Excel 多工作表用 `--sheet` 选(名称或从 1 数的序号)。
+**`--file` 列约定**(CSV / Excel,首行表头;CSV 兼容 UTF-8 与 GBK):默认第 1 列类目、其余列数值,多数值列时 bar/line/area 自动转多系列图(系列名 = 表头;area 配 `--stacked` / `--percent` 出堆积面积),combo 取类目列后两列(柱、线);box / violin 每列一组(表头 = 组名);sankey 取前 3 列 = 源、目标、数值;scatter/bubble 按 x, y(, sizes)(, labels) 取列;heatmap 类目列 = 行名、表头 = 列名;hist 第 1 列为原始样本;宽表用 `--cat-col` / `--col` 选列,Excel 多工作表用 `--sheet` 选(名称或从 1 数的序号)。
 
 ```bash
 chartmove bar "季度产量" Q1=120 Q2=200 Q3=90 --style mckinsey                  # 内联数据
@@ -71,7 +71,7 @@ chartmove area "渠道流量" --categories 1月,2月,3月 --series '[[线上,[82
 chartmove sunburst "销售构成" --data '{"水果": {"苹果": 30}, "蔬菜": {"白菜": 10}}'   # 旭日图(两级层级)
 chartmove line "盈亏率" --file 基金.csv --cat-col 基金名称 --col "盈亏率(%)" --style cyberpunk   # 表格选列
 chartmove rose "品类销量" --file 销量.xlsx --sheet 2024          # 玫瑰图,读指定工作表
-chartmove themes                                  # 查看 13 套主题(分属 4 个风格包)
+chartmove themes                                  # 查看 15 套主题(分属 4 个风格包)
 chartmove themes --preview                        # 另出主题预览拼版图(PNG)
 ```
 
@@ -124,10 +124,10 @@ Windows host 报中文编码错时,可在 `env` 里加 `PYTHONUTF8 = "1"`(TOML)�
 
 | 工具 | 参数 | 返回 |
 |---|---|---|
-| `make_chart` | `type`(23 种枚举)、`title`、`categories` / `values`(单系列;pareto 自动降序加累计占比线)、`series`(多系列;gantt 用 `starts` / `ends`,dumbbell 恰好 2 个系列,box / violin 为 `[[组名,[样本...]],...]`)、`stacked` / `percent`(bar-multi 堆积 / 百分比堆积;area 多系列同样支持)、`hierarchy`(sunburst 两级层级:`{父类目: {子类目: 数值}}`)、`x` / `y` / `sizes`(散点 / 气泡)、`rows` / `cols` / `matrix`(热力图)、`lower` / `upper`(折线区间带)、`line_values`(combo 折线值)、`horizontal`(bar 横向)、`trend`(散点趋势线)、`labels`(散点 / 气泡逐点标注)、`total`(waterfall 合计柱,默认 true)、`bins`(hist:整数 / 'auto' / 严格递增边界数组)、`slope`(dumbbell 坡度图)、`style`(默认 business)、`animate`(默认 false,出 GIF)、`loop`(默认 false,GIF 无限循环;仅 GIF 生效)、`sample`(默认 null,仅折线类,LTTB 降采样目标点数)、`numfmt`(auto / plain / percent,默认 auto 万/亿)、`note`(底部脚注)、`fmt`(png/pdf/tif/gif/mp4)、`out` / `out_dir`、`file` / `cat_col` / `col` / `sheet`(CSV / Excel 直读,见下) | JSON:`{path(绝对路径,即交付物), file_size, type, style, animated}` |
-| `list_themes` | `preview`(可选,生成主题预览拼版图)、`out_dir`(可选,指定拼版图输出目录) | 13 套主题(分属 4 个风格包):名称 + 中文标签 + 一句话描述;`preview=true` 时附拼版图路径 |
+| `make_chart` | `type`(24 种枚举)、`title`、`categories` / `values`(单系列;pareto 自动降序加累计占比线)、`series`(多系列;gantt 用 `starts` / `ends`,dumbbell 恰好 2 个系列,box / violin 为 `[[组名,[样本...]],...]`)、`links`(sankey:`[[源,目标,数值],...]` 或 `{source,target,value}` 字典)、`stacked` / `percent`(bar-multi 堆积 / 百分比堆积;area 多系列同样支持)、`hierarchy`(sunburst 两级层级:`{父类目: {子类目: 数值}}`)、`x` / `y` / `sizes`(散点 / 气泡)、`rows` / `cols` / `matrix`(热力图)、`lower` / `upper`(折线区间带)、`line_values`(combo 折线值)、`horizontal`(bar 横向)、`trend`(散点趋势线)、`labels`(散点 / 气泡逐点标注)、`total`(waterfall 合计柱,默认 true)、`bins`(hist:整数 / 'auto' / 严格递增边界数组)、`slope`(dumbbell 坡度图)、`style`(默认 business)、`animate`(默认 false,出 GIF)、`loop`(默认 false,GIF 无限循环;仅 GIF 生效)、`sample`(默认 null,仅折线类,LTTB 降采样目标点数)、`numfmt`(auto / plain / percent,默认 auto 万/亿)、`note`(底部脚注)、`fmt`(png/pdf/tif/gif/mp4)、`out` / `out_dir`、`file` / `cat_col` / `col` / `sheet`(CSV / Excel 直读,见下) | JSON:`{path(绝对路径,即交付物), file_size, type, style, animated}` |
+| `list_themes` | `preview`(可选,生成主题预览拼版图)、`out_dir`(可选,指定拼版图输出目录) | 15 套主题(分属 4 个风格包):名称 + 中文标签 + 一句话描述;`preview=true` 时附拼版图路径 |
 
-**`file` 数据**:agent 手头有 CSV / Excel 时传 `file` 路径即可,优先于内联数据,不必把整表内联进参数;`cat_col` / `col` 选类目列 / 挑 1 个数值列(表头名或从 1 数的序号),`sheet` 选 Excel 工作表。列约定与 CLI `--file` 相同(见上文):bar / line / area 多数值列自动升级多系列(返回 `type` 如实报告),combo 取两列(柱、线),box / violin 每列一组,scatter/bubble 按 x, y(, sizes)(, labels) 取列,hist 第 1 列为样本,heatmap 第 1 列为行名。
+**`file` 数据**:agent 手头有 CSV / Excel 时传 `file` 路径即可,优先于内联数据,不必把整表内联进参数;`cat_col` / `col` 选类目列 / 挑 1 个数值列(表头名或从 1 数的序号),`sheet` 选 Excel 工作表。列约定与 CLI `--file` 相同(见上文):bar / line / area 多数值列自动升级多系列(返回 `type` 如实报告),combo 取两列(柱、线),box / violin 每列一组,sankey 取前 3 列(源、目标、数值),scatter/bubble 按 x, y(, sizes)(, labels) 取列,hist 第 1 列为样本,heatmap 第 1 列为行名。
 
 ## 开发环境
 
@@ -136,7 +136,7 @@ py -3.13 -m venv .venv                              # Python >=3.10
 .venv/Scripts/python.exe -m pip install -e ".[dev]" # 可编辑安装 + pytest/ruff
 .venv/Scripts/python.exe -m pytest -n auto         # smoke test(pytest-xdist 并行,全量约 30 秒)
 .venv/Scripts/python.exe -m ruff check src tests examples
-.venv/Scripts/python.exe examples/make_all.py        # 一次生成全部 26 张,默认写入 ./Results/
+.venv/Scripts/python.exe examples/make_all.py        # 一次生成全部 27 张,默认写入 ./Results/
 winget install Gyan.FFmpeg                          # 可选,仅 MP4 动画需要
 ```
 
@@ -144,12 +144,12 @@ CI:push / PR 自动跑 ruff lint + pytest smoke test,见 `.github/workflows/ci.y
 
 ## 图表能力
 
-- 23 种类型:`bar`(支持 `horizontal=True` 横向条形)/ `line`(可加 `lower` / `upper` 预测区间带)/ `line_multi` / `area`(单系列或多系列;多系列默认半透明叠加,`stacked=True` 堆积、`percent=True` 百分比堆积)/ `pie` / `donut` / `rose`(Nightingale 极坐标柱状,半径即数值)/ `treemap`(矩形树图,面积即占比)/ `combo` / `bar_multi`(默认分组并列,`stacked=True` 堆积、`percent=True` 百分比堆积,占比标在段内)/ `radar`(多系列,需 `series`)/ `scatter`(可选趋势线)/ `bubble` / `hist` / `box` / `violin`(小提琴图,KDE 密度形态,组内 IQR 线与中位数点;每组需 ≥2 个不同取值)/ `heatmap` / `waterfall` / `pareto`(帕累托图:柱自动降序 + 右轴累计占比线 + 80% 参考线)/ `funnel`(自动逐级转化率)/ `gantt`(甘特图,数值轴起止)/ `dumbbell`(哑铃图,两期对比,`slope=True` 出坡度图)/ `sunburst`(旭日图,两级层级占比,内环父类目 = 子类目合计)
-- 13 套主题分属 4 个风格包(默认 `business` 商务极简):
+- 24 种类型:`bar`(支持 `horizontal=True` 横向条形)/ `line`(可加 `lower` / `upper` 预测区间带)/ `line_multi` / `area`(单系列或多系列;多系列默认半透明叠加,`stacked=True` 堆积、`percent=True` 百分比堆积)/ `pie` / `donut` / `rose`(Nightingale 极坐标柱状,半径即数值)/ `treemap`(矩形树图,面积即占比)/ `combo` / `bar_multi`(默认分组并列,`stacked=True` 堆积、`percent=True` 百分比堆积,占比标在段内)/ `radar`(多系列,需 `series`)/ `scatter`(可选趋势线)/ `bubble` / `hist` / `box` / `violin`(小提琴图,KDE 密度形态,组内 IQR 线与中位数点;每组需 ≥2 个不同取值)/ `heatmap` / `waterfall` / `pareto`(帕累托图:柱自动降序 + 右轴累计占比线 + 80% 参考线)/ `funnel`(自动逐级转化率)/ `gantt`(甘特图,数值轴起止)/ `dumbbell`(哑铃图,两期对比,`slope=True` 出坡度图)/ `sankey`(桑基图:`links=[[源,目标,数值],...]` 左→右单向流量走向,节点高度即流量,自动分列与减交叉,循环流向报错;节点按列轮换色板、缎带继承源节点色,透明度按交叉密度自动分层;源节点很多时建议先聚合小流量)/ `sunburst`(旭日图,两级层级占比,内环父类目 = 子类目合计)
+- 15 套主题分属 4 个风格包(默认 `business` 商务极简):
   - **学术包**:`academic` 学术Ticks标准风 / `grayscale` 灰度单色学术 / `ggplot` 复古统计 / `colorblind` 色盲无障碍(Okabe-Ito)
-  - **商务包**:`business` 商务极简 / `mckinsey` 麦肯锡 / `dashboard` 深色看板
-  - **简约演示包**:`whitegrid` 白底网格 / `minimal` 纯极简无脊线 / `morandi` 莫兰迪低饱和
-  - **其他风格包**:`sketch` 手绘草图(xkcd 式) / `terminal` 暗黑程序员 / `cyberpunk` 赛博朋克霓虹
+  - **商务包**:`business` 商务极简 / `mckinsey` 麦肯锡 / `dashboard` 深色看板 / `sunset` 晚霞
+  - **简约演示包**:`whitegrid` 白底网格 / `minimal` 纯极简无脊线 / `morandi` 莫兰迪低饱和 / `harvest` 大地
+  - **其他风格包**:`sketch` 手绘草图(xkcd 式) / `terminal` 极客 / `cyberpunk` 霓虹
   - 主题元数据 `THEME_PACKS` / `THEME_LABELS` / `THEME_DESCS` 供 CLI `themes` 子命令与 MCP `list_themes` 使用
 - 输出:PNG / PDF(矢量)/ TIF(600dpi,期刊投稿)/ GIF("数据生长"动画,默认播一遍停末帧适配 PPT 放映与聊天窗,`--loop` / `loop=true` 可无限循环)/ MP4(需 ffmpeg,循环由播放器决定);`figsize` / `dpi` 参数化,默认 16:9 / 150dpi(1920×1080)
 - 差异化:最大/最小值自动高亮、y 轴智能从 0 起、中文字体零配置(Windows 雅黑 / macOS 苹方 / Linux Noto CJK,见 fonts.py);数值标签/刻度默认中文单位(`numfmt='auto'`:≥1e4 万、≥1e8 亿,percent 追加 %,plain 原样);`note` 参数出底部脚注(数据来源 / 备注)

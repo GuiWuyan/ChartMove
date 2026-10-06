@@ -17,3 +17,4 @@ __pycache__/
 /config.json
 /.dsh_probe/
 /docs/
+/pytest-of-Huawei/

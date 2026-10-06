@@ -157,8 +157,8 @@ def test_tools_listed():
     assert set(schema['properties']['type']['enum']) == {
         'bar', 'line', 'line-multi', 'area', 'pie', 'donut', 'combo', 'bar-multi',
         'radar', 'scatter', 'bubble', 'hist', 'box', 'violin', 'heatmap',
-        'waterfall', 'funnel', 'rose', 'treemap', 'gantt', 'dumbbell', 'sunburst',
-        'pareto'}
+        'waterfall', 'funnel', 'rose', 'treemap', 'gantt', 'dumbbell', 'sankey',
+        'sunburst', 'pareto'}
 
 
 def test_make_chart_bar_png(tmp_path):
@@ -336,6 +336,28 @@ def test_violin_inline_and_constant_rejected(tmp_path):
                        'series': [['g', [5, 5, 5]]], 'out_dir': str(tmp_path)})
     assert result.is_error
     assert '2 个不同的取值' in result.content[0].text
+
+
+def test_sankey_links_and_cycle_rejected(tmp_path):
+    """sankey 内联 links 出图;循环流向与非法流量给中文 ToolError。"""
+    _, result = _call({'type': 'sankey', 'title': '资金流向',
+                       'links': [['收入', '支出', 300], ['收入', '储蓄', 200],
+                                 ['储蓄', '投资', 120]],
+                       'out_dir': str(tmp_path)})
+    assert not result.is_error
+    data = json.loads(result.content[0].text)
+    assert data['type'] == 'sankey'
+    p = Path(data['path'])
+    assert p.exists() and p.stat().st_size > 0
+    p.unlink()
+
+    for bad, msg in (([['A', 'B', 10], ['B', 'A', 5]], '循环流向'),
+                     ([['A', 'B', -3]], '需 > 0'),
+                     ([['A', 'B']], '每项需为')):
+        _, result = _call({'type': 'sankey', 'title': 't', 'links': bad,
+                           'out_dir': str(tmp_path)})
+        assert result.is_error
+        assert msg in result.content[0].text
 
 
 def test_file_col_picks_value_column(tmp_path):

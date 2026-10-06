@@ -33,6 +33,7 @@ from chartmove import (
     pie,
     radar,
     rose,
+    sankey,
     scatter,
     sunburst,
     treemap,
@@ -58,7 +59,7 @@ from chartmove.graph.charts.distribution import (
     _scatter_draw,
     _violin_draw,
 )
-from chartmove.graph.charts.flow import _funnel_draw
+from chartmove.graph.charts.flow import _funnel_draw, _sankey_draw, _sankey_layout
 from chartmove.graph.charts.trend import (
     _area_draw,
     _combo_draw,
@@ -114,6 +115,9 @@ CASES: dict[str, tuple] = {
     'dumbbell': (dumbbell, dict(categories=CATS, series=SERIES, slope=True)),
     'sunburst': (sunburst, dict(hierarchy=HIERARCHY)),
     'pareto': (pareto, dict(SINGLE)),
+    'sankey': (sankey, dict(links=[['工资', '生活开支', 8000], ['工资', '储蓄', 4000],
+                                   ['副业', '储蓄', 1500], ['工资', '房租', 3000],
+                                   ['储蓄', '基金定投', 3000], ['储蓄', '应急金', 2500]])),
 }
 
 
@@ -253,12 +257,14 @@ def _stability_draws() -> dict:
         'waterfall': lambda: _waterfall_draw('t', cats, vals, th),
         'funnel': lambda: _funnel_draw('t', ['访问', '加购'], [1000, 420], th),
         'pareto': lambda: _pareto_draw('t', cats, vals, th),
+        'sankey': lambda: _sankey_draw('t', [('A', 'C', 30), ('B', 'D', 20),
+                                             ('C', 'E', 10)], th),
     }
 
 
 def test_axes_limits_stable_during_animation():
     """动画期间坐标轴固定:逐元素出现的图(散点/气泡/箱线/折线等)轴不得随数据扩张滑动。"""
-    fig, axes = plt.subplots(2, 7, figsize=(21, 6))
+    fig, axes = plt.subplots(3, 5, figsize=(17, 9))
     try:
         for ax, (name, build) in zip(axes.flat, _stability_draws().items()):
             draw = build()
@@ -567,8 +573,8 @@ def test_donut_show_values_false():
 
 
 def test_theme_metadata():
-    """13 主题分 4 包;每个主题都有中文名与一句话描述,包成员无遗漏无重复。"""
-    assert len(THEMES) == 13
+    """15 主题分 4 包;每个主题都有中文名与一句话描述,包成员无遗漏无重复。"""
+    assert len(THEMES) == 15
     assert sorted(THEME_PACKS) == ['其他风格包', '商务包', '学术包', '简约演示包']
     packed = [k for members in THEME_PACKS.values() for k in members]
     assert sorted(packed) == sorted(THEMES)
@@ -694,6 +700,59 @@ def test_violin_draws_bodies_and_inner():
 def test_funnel_negative_rejected():
     with pytest.raises(ValueError, match='漏斗图'):
         funnel('t', ['a', 'b'], [10, -5])
+
+
+def test_sankey_layout_and_validation(tmp_path):
+    """桑基:最长路径分列 + 缎带锚点在节点范围内;循环/自环/非正流量/坏形状全拒;
+    动画(缎带从源向目标生长)出 GIF。"""
+    links = [['工资', '生活开支', 8000], ['工资', '储蓄', 4000],
+             ['副业', '储蓄', 1500], ['储蓄', '基金定投', 3000], ['储蓄', '应急金', 2500]]
+    nodes, recs = _sankey_layout(links)
+    assert nodes['工资']['col'] == 0 and nodes['副业']['col'] == 0
+    assert nodes['储蓄']['col'] == 1
+    assert nodes['基金定投']['col'] == 2 and nodes['应急金']['col'] == 2
+    assert nodes['储蓄']['val'] == 5500  # max(入流 5500, 出流 5500)
+    for r in recs:
+        s_nd, t_nd = nodes[r['s']], nodes[r['t']]
+        assert s_nd['bot'] <= r['sy1'] < r['sy0'] <= s_nd['top']   # 锚点在源节点内
+        assert t_nd['bot'] <= r['ty1'] < r['ty0'] <= t_nd['top']   # 锚点在目标节点内
+    path, warns = _render(sankey, dict(links=links), tmp_path, animate=True, fmt='gif')
+    _assert_ok(path, 'gif', warns)
+    with pytest.raises(ValueError, match='循环流向'):
+        sankey('t', [['A', 'B', 10], ['B', 'C', 5], ['C', 'A', 8]])
+    with pytest.raises(ValueError, match='指向自身'):
+        sankey('t', [['A', 'A', 10]])
+    with pytest.raises(ValueError, match='需 > 0'):
+        sankey('t', [['A', 'B', -3]])
+    with pytest.raises(ValueError, match='每项需为'):
+        sankey('t', [['A', 'B']])
+    with pytest.raises(ValueError, match='不能为空'):
+        sankey('t', [])
+
+
+def test_sankey_node_colors():
+    """桑基配色:全部节点取色板(按列内位置轮换),缎带继承源节点色;
+    缎带透明度按"左右端高低次序互换"分层——互换即中段交叠,越多越透明。"""
+    from matplotlib.patches import Polygon as _Poly
+    from matplotlib.patches import Rectangle as _Rect
+    fig, ax = plt.subplots()
+    try:
+        th = _theme('business')
+        # 2×2 全连接:A→Y 与 B→X 次序互换(必交叉),A→X 与 B→Y 顺序保持
+        draw = _sankey_draw('t', [('A', 'X', 30), ('A', 'Y', 20),
+                                  ('B', 'X', 30), ('B', 'Y', 20)], th)
+        draw(ax, 1.0)
+        palette = {tuple(to_rgba(c)) for c in th['palette']}
+        rects = [p for p in ax.patches if isinstance(p, _Rect)]
+        cols = [tuple(to_rgba(r.get_facecolor())) for r in rects]
+        assert set(cols) <= palette  # 全部节点都是色板色
+        assert cols[0] == cols[2]    # 两列同位置节点轮换到同一色(A、X 各列第 0 位)
+        assert cols[1] == cols[3]
+        assert cols[0] != cols[1]    # 同列相邻位置颜色不同
+        polys = [p for p in ax.patches if isinstance(p, _Poly)]
+        assert len({round(p.get_alpha(), 3) for p in polys}) >= 2  # 透明度分层生效
+    finally:
+        plt.close(fig)
 
 
 def test_negative_values_rejected():

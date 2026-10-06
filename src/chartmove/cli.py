@@ -1,4 +1,4 @@
-"""CLI 入口:23 种图表类型,一条命令出图(数据写法与参数表见 README.md)。
+"""CLI 入口:24 种图表类型,一条命令出图(数据写法与参数表见 README.md)。
 
     chartmove bar "季度产量" Q1=120 Q2=200 Q3=90 --style mckinsey
     chartmove line-multi "对比" --categories 1月,2月,3月 --series series.json
@@ -13,7 +13,15 @@ from functools import partial
 from pathlib import Path
 
 from ._version import __version__
-from .table import file_box_groups, file_columns, file_matrix, file_samples, file_xy, parse_float
+from .table import (
+    file_box_groups,
+    file_columns,
+    file_links,
+    file_matrix,
+    file_samples,
+    file_xy,
+    parse_float,
+)
 from .themes import THEME_DESCS, THEME_LABELS, THEME_PACKS, THEMES
 
 _MULTI_TYPES = ('line-multi', 'bar-multi', 'radar')
@@ -356,6 +364,20 @@ def _run_dumbbell(kind, args):
     return fn(args.title, cats, ss, slope=slope, **kw)
 
 
+def _run_sankey(kind, args):
+    fn = _chart_fn(kind)
+    kw = _common_kwargs(args)
+    if args.file:  # 3 列:源、目标、数值
+        return fn(args.title, file_links(args.file, getattr(args, 'sheet', None)), **kw)
+    if not args.data:
+        raise ValueError('sankey 需要 --data 传 links JSON'
+                         '(如 {"links": [["收入", "支出", 300]]}),'
+                         '或 --file(CSV/Excel,3 列:源、目标、数值)')
+    d = _load_json(args.data)
+    items = d.get('links', d) if isinstance(d, dict) else d
+    return fn(args.title, items, **kw)
+
+
 def _default_run(kind, args):
     fn = _chart_fn(kind)
     kw = _common_kwargs(args)
@@ -385,6 +407,7 @@ _RUNNERS = {
     'heatmap': _run_heatmap,
     'gantt': _run_gantt,
     'dumbbell': _run_dumbbell,
+    'sankey': _run_sankey,
 }
 
 
@@ -456,6 +479,7 @@ def _build_parser() -> argparse.ArgumentParser:
         ('heatmap', '热力图', None),
         ('gantt', '甘特图', None),
         ('dumbbell', '哑铃图/坡度图(--slope)', None),
+        ('sankey', '桑基图(左→右流量走向)', None),
         ('sunburst', '旭日图(两级层级占比,--data 传层级 JSON)', None),
     ):
         sp = sub.add_parser(name, parents=[common], help=text, description=text)

@@ -6,7 +6,7 @@ from pathlib import Path
 
 __all__ = [
     'read_table', 'to_float', 'parse_float', 'pick_column', 'file_columns',
-    'file_box_groups', 'file_xy', 'file_samples', 'file_matrix',
+    'file_box_groups', 'file_xy', 'file_samples', 'file_matrix', 'file_links',
 ]
 
 
@@ -115,6 +115,19 @@ def file_matrix(path, cat_col=None, sheet=None) -> tuple[list[str], list[str], l
     cols = [header[j] or f'列{j + 1}' for j in val_is]
     matrix = [[to_float(r[j], f'(列「{header[j]}」)') for j in val_is] for r in rows]
     return rlabels, cols, matrix
+
+
+def file_links(path, sheet=None) -> list[tuple[str, str, float]]:
+    """桑基图取数:前 3 列 = 源、目标、数值。"""
+    header, rows = read_table(path, sheet)
+    if len(header) < 3:
+        raise ValueError(f'sankey 的表格需要 3 列(源、目标、数值),'
+                         f'表头只有 {len(header)} 列')
+    out = [(r[0], r[1], to_float(r[2], f'(行「{r[0]}→{r[1]}」)'))
+           for r in rows if len(r) >= 3 and r[0] and r[1] and r[2] != '']
+    if not out:
+        raise ValueError('表格无有效数据行(每行需:源, 目标, 数值)')
+    return out
 
 
 def _read_csv(path) -> tuple[list[str], list[list[str]]]:
