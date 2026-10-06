@@ -47,6 +47,8 @@ def _expect_file(tmp_path, filename: str) -> None:
                json.dumps([['s1', [1, 2, 3]]]))),
     ('box', ('box', 't', '--series', json.dumps([['g1', [1, 2, 3, 4]],
                                                  ['g2', [5, 6, 7]]]))),
+    ('violin', ('violin', 't', '--series', json.dumps([['g1', [1, 2, 3, 4]],
+                                                       ['g2', [5, 6, 7]]]))),
     ('scatter', ('scatter', 't', '--x', '1,2,3', '--y', '4,5,6', '--trend',
                  '--labels', '甲,乙,丙')),
     ('bubble', ('bubble', 't', '--x', '1,2', '--y', '3,4', '--sizes', '10,20')),

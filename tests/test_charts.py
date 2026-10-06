@@ -36,6 +36,7 @@ from chartmove import (
     scatter,
     sunburst,
     treemap,
+    violin,
     waterfall,
 )
 from chartmove.graph.charts.categorical import (
@@ -55,6 +56,7 @@ from chartmove.graph.charts.distribution import (
     _heatmap_draw,
     _hist_draw,
     _scatter_draw,
+    _violin_draw,
 )
 from chartmove.graph.charts.flow import _funnel_draw
 from chartmove.graph.charts.trend import (
@@ -98,6 +100,9 @@ CASES: dict[str, tuple] = {
     'box': (box, dict(series=[('组A', [3, 5, 4, 6, 7, 5, 4]),
                               ('组B', [8, 9, 7, 10, 6, 9, 8]),
                               ('组C', [2, 3, 2, 4, 3, 5, 2])])),
+    'violin': (violin, dict(series=[('组A', [3, 5, 4, 6, 7, 5, 4, 8]),
+                                    ('组B', [8, 9, 7, 10, 6, 9, 8, 11]),
+                                    ('组C', [2, 3, 2, 4, 3, 5, 2, 1])])),
     'heatmap': (heatmap, dict(rows=['周一', '周二', '周三', '周四'],
                               cols=['上午', '中午', '下午', '晚间'], values=MATRIX)),
     'waterfall': (waterfall, dict(categories=CATS, values=[120, -30, 50, -20])),
@@ -243,6 +248,8 @@ def _stability_draws() -> dict:
         'bubble': lambda: _bubble_draw('t', xs, ys, [10, 40, 5, 25, 35, 15], th),
         'hist': lambda: _hist_draw('t', [68, 72, 70, 75, 77, 80, 82, 85], 8, th),
         'box': lambda: _box_draw('t', [('组A', [3, 5, 4, 6, 7]), ('组B', [8, 9, 7])], th),
+        'violin': lambda: _violin_draw('t', [('组A', np.array([3, 5, 4, 6, 7])),
+                                             ('组B', np.array([8, 9, 7, 10, 6]))], th),
         'waterfall': lambda: _waterfall_draw('t', cats, vals, th),
         'funnel': lambda: _funnel_draw('t', ['访问', '加购'], [1000, 420], th),
         'pareto': lambda: _pareto_draw('t', cats, vals, th),
@@ -652,6 +659,38 @@ def test_box_empty_samples():
         box('t', [('组A', [1, 2]), ('组B', [])])
 
 
+def test_violin_kde_validation():
+    """小提琴图校验契约:每组需 ≥2 个不同取值(零方差会让 gaussian KDE 裸穿英文异常)。"""
+    with pytest.raises(ValueError, match='2 个不同的取值'):
+        violin('t', [('组A', [5, 5, 5])])
+    with pytest.raises(ValueError, match='2 个不同的取值'):
+        violin('t', [('组A', [5])])
+
+
+def test_violin_draws_bodies_and_inner():
+    """小提琴绘制:KDE 体 + 组内 IQR 线与中位数点;p=0 无体但轴已钉死。"""
+    from matplotlib.collections import PolyCollection
+    fig, ax = plt.subplots()
+    try:
+        draw = _violin_draw('t', [('组A', np.array([3.0, 5, 4, 6, 7])),
+                                  ('组B', np.array([8.0, 9, 7, 10, 6]))],
+                            _theme('business'))
+        draw(ax, 0.0)
+        assert not ax.collections
+        assert ax.get_xlim() == (0.5, 2.5)  # x 轴首帧即最终范围
+        ax.clear()
+        draw(ax, 1.0)
+        bodies = [c for c in ax.collections if isinstance(c, PolyCollection)]
+        assert len(bodies) == 2
+        assert len(ax.lines) == 2  # 两组 IQR 线
+        from matplotlib.collections import PathCollection
+        dots = [c for c in ax.collections
+                if isinstance(c, PathCollection) and len(c.get_offsets()) == 1]
+        assert len(dots) == 2  # 每组一个中位数点
+    finally:
+        plt.close(fig)
+
+
 def test_funnel_negative_rejected():
     with pytest.raises(ValueError, match='漏斗图'):
         funnel('t', ['a', 'b'], [10, -5])
@@ -774,6 +813,8 @@ def test_nan_inf_rejected():
         scatter('t', [1, float('inf')], [1, 2])
     with pytest.raises(ValueError, match='nan'):
         box('t', [('组A', [1, float('nan')])])
+    with pytest.raises(ValueError, match='nan'):
+        violin('t', [('组A', [1, float('nan')])])
     with pytest.raises(ValueError, match='nan'):
         heatmap('t', ['r'], ['c'], [[float('nan')]])
     with pytest.raises(ValueError, match='nan'):

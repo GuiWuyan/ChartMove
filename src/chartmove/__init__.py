@@ -1,12 +1,13 @@
-"""chartmove —— 中文数据图表生成器:22 种图表、13 套主题分属 4 个风格包,
+"""chartmove —— 中文数据图表生成器:23 种图表、13 套主题分属 4 个风格包,
 输出 PNG / PDF / TIF / GIF / MP4;入口 CLI 与 MCP Server。"""
 from ._version import __version__
 from .themes import THEME_DESCS, THEME_LABELS, THEME_PACKS, THEMES
 
 __all__ = [
     "bar", "line", "pie", "donut", "area", "combo", "line_multi", "bar_multi",
-    "radar", "scatter", "bubble", "hist", "box", "heatmap", "waterfall", "funnel",
-    "rose", "themes_preview", "treemap", "gantt", "dumbbell", "sunburst", "pareto",
+    "radar", "scatter", "bubble", "hist", "box", "violin", "heatmap", "waterfall",
+    "funnel", "rose", "themes_preview", "treemap", "gantt", "dumbbell", "sunburst",
+    "pareto",
     "THEMES", "THEME_PACKS", "THEME_LABELS", "THEME_DESCS", "__version__",
 ]
 
@@ -15,7 +16,8 @@ __all__ = [
 _CHART_EXPORTS = frozenset({
     "area", "bar", "bar_multi", "box", "bubble", "combo", "donut", "dumbbell",
     "funnel", "gantt", "heatmap", "hist", "line", "line_multi", "pareto", "pie",
-    "radar", "rose", "scatter", "sunburst", "themes_preview", "treemap", "waterfall",
+    "radar", "rose", "scatter", "sunburst", "themes_preview", "treemap", "violin",
+    "waterfall",
 })
 
 

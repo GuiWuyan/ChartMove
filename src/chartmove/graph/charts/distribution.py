@@ -1,4 +1,4 @@
-"""分布与关系类图表:直方 / 箱线 / 散点(趋势线)/ 气泡 / 热力。"""
+"""分布与关系类图表:直方 / 箱线 / 小提琴 / 散点(趋势线)/ 气泡 / 热力。"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -215,6 +215,60 @@ def box(title: str, series, *, style='business', animate=False, fmt=None, loop=F
     ss = _validate_samples(series)
     th = _theme(style, numfmt, note)
     return _render('box', title, _box_draw(title, ss, th),
+                   animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
+                   th=th, figsize=figsize, dpi=dpi)
+
+
+def _violin_draw(title, groups, th):
+    """groups: [(组名, np.ndarray 样本), ...];动画 = 小提琴从中位数向两侧展开。"""
+    n = len(groups)
+    lo = min(float(a.min()) for _, a in groups)
+    hi = max(float(a.max()) for _, a in groups)
+    pad = (hi - lo) * 0.12 or 1.0
+
+    def draw(ax, p):
+        _style(ax, title, th)
+        for i, (_, a) in enumerate(groups):
+            pr = _stagger(p, i, n)
+            if pr <= 0:  # pr=0 时样本全等于中位数,KDE 协方差奇异,必须跳过
+                continue
+            med = float(np.median(a))
+            # KDE 带宽随样本自适应:向中位数等比收缩的样本画出的就是等比缩小的小提琴
+            vp = ax.violinplot([med + (a - med) * pr], positions=[i + 1], widths=0.7,
+                               showextrema=False, points=100)
+            for body in vp['bodies']:
+                body.set_facecolor(th['palette'][i % len(th['palette'])])
+                body.set_alpha(0.65)
+                body.set_edgecolor(th['axis'])
+                body.set_linewidth(1.0)
+            q1, _, q3 = (float(v) for v in np.percentile(a, [25, 50, 75]))
+            # IQR 线随小提琴一起从中位数生长(solid_capstyle 防止 q1=q3 时画出端点帽)
+            ax.plot([i + 1, i + 1], [med + (q1 - med) * pr, med + (q3 - med) * pr],
+                    color=th['text'], alpha=0.6 * pr, linewidth=2.5, zorder=5,
+                    solid_capstyle='butt')
+            ax.scatter([i + 1], [med], s=45, color=th['text'], alpha=pr, zorder=6)
+        ax.set_xticks(range(1, n + 1))
+        ax.set_xticklabels([nm for nm, _ in groups])
+        ax.set_xlim(0.5, n + 0.5)  # 小提琴逐个出现,x 轴从首帧钉在最终范围
+        ax.set_ylim(lo - pad, hi + pad)
+        _vfmt(ax, [lo, hi], th)
+    return draw
+
+
+def violin(title: str, series, *, style='business', animate=False, fmt=None, loop=False,
+           out: str | None = None, out_dir=None, figsize=None, dpi=None, numfmt='auto',
+           note: str | None = None) -> Path:
+    """小提琴图:series=[(组名, 原始样本), ...],各组样本数无需对齐;KDE 密度形态 +
+    组内 IQR 线与中位数点;每组需 ≥2 个不同取值。animate=True 从中位数展开。"""
+    ss = _validate_samples(series)
+    for nm, vals in ss:
+        if len(set(vals)) < 2:  # 零方差会让 gaussian KDE 抛英文 LinAlgError,入口先拦
+            raise ValueError(f'小提琴图每组需至少 2 个不同的取值(密度估计要求),'
+                             f'系列「{nm}」不满足')
+    th = _theme(style, numfmt, note)
+    return _render('violin', title,
+                   _violin_draw(title, [(nm, np.asarray(v, dtype=float))
+                                        for nm, v in ss], th),
                    animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)
 

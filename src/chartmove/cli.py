@@ -1,4 +1,4 @@
-"""CLI 入口:22 种图表类型,一条命令出图(数据写法与参数表见 README.md)。
+"""CLI 入口:23 种图表类型,一条命令出图(数据写法与参数表见 README.md)。
 
     chartmove bar "季度产量" Q1=120 Q2=200 Q3=90 --style mckinsey
     chartmove line-multi "对比" --categories 1月,2月,3月 --series series.json
@@ -238,13 +238,14 @@ def _run_sunburst(kind, args):
     return fn(args.title, d.get('hierarchy', d), **_common_kwargs(args))
 
 
-def _run_box(kind, args):
+def _run_samples(kind, args):
+    """box / violin 共用:series=[(组名, 原始样本), ...],--series JSON 或 --file 每列一组。"""
     fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     if args.file:  # 每列一组,首行表头=组名,单元格为原始样本
         return fn(args.title, file_box_groups(args.file, getattr(args, 'sheet', None)), **kw)
     if not args.series:
-        raise ValueError('box 需要 --series(JSON)或 --file(CSV/Excel,每列一组)')
+        raise ValueError(f'{kind} 需要 --series(JSON)或 --file(CSV/Excel,每列一组)')
     return fn(args.title, _norm_series(_load_json(args.series)), **kw)
 
 
@@ -376,7 +377,8 @@ _RUNNERS = {
     'radar': _run_multi,
     'area': _run_area,
     'sunburst': _run_sunburst,
-    'box': _run_box,
+    'box': _run_samples,
+    'violin': _run_samples,
     'scatter': _run_xy,
     'bubble': _run_xy,
     'hist': _run_hist,
@@ -447,6 +449,7 @@ def _build_parser() -> argparse.ArgumentParser:
         ('bar-multi', '多系列柱状图(--stacked 堆积 / --percent 百分比堆积)', None),
         ('radar', '雷达图', None),
         ('box', '箱线图', None),
+        ('violin', '小提琴图(分布形态,组内 IQR 与中位数内标)', None),
         ('scatter', '散点图', None),
         ('bubble', '气泡图', None),
         ('hist', '直方图', '原始样本数值,空格分隔(或 --data JSON)'),
@@ -490,8 +493,9 @@ def _build_parser() -> argparse.ArgumentParser:
     sps['area'].add_argument('--sample', type=int, help='同 line:LTTB 降采样目标点数')
     sps['line-multi'].add_argument('--sample', type=int,
                                    help='同 line:LTTB 降采样(各系列取保留点并集)')
-    sps['box'].add_argument('--series',
-                            help='样本 JSON:[[组名, [样本...]], ...](与 --file 二选一)')
+    for name in ('box', 'violin'):
+        sps[name].add_argument('--series',
+                               help='样本 JSON:[[组名, [样本...]], ...](与 --file 二选一)')
     for name in _XY_TYPES:
         sps[name].add_argument('--x', help='x 数值,逗号分隔')
         sps[name].add_argument('--y', help='y 数值,逗号分隔')

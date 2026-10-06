@@ -17,8 +17,8 @@ from .themes import THEME_DESCS, THEME_LABELS, THEME_PACKS, THEMES
 
 ChartType = Literal[
     'bar', 'line', 'line-multi', 'area', 'pie', 'donut', 'combo', 'bar-multi',
-    'radar', 'scatter', 'bubble', 'hist', 'box', 'heatmap', 'waterfall', 'funnel',
-    'rose', 'treemap', 'gantt', 'dumbbell', 'sunburst', 'pareto']
+    'radar', 'scatter', 'bubble', 'hist', 'box', 'violin', 'heatmap', 'waterfall',
+    'funnel', 'rose', 'treemap', 'gantt', 'dumbbell', 'sunburst', 'pareto']
 Fmt = Literal['png', 'pdf', 'tif', 'gif', 'mp4']
 
 
@@ -38,7 +38,7 @@ server = MCPServer(
     name='chartmove',
     version=__version__,
     instructions=(
-        'Chinese chart generator: 22 chart types x 13 themes, no font configuration '
+        'Chinese chart generator: 23 chart types x 13 themes, no font configuration '
         'needed, output is a persistent file. Use list_themes to discover styles. '
         'Call make_chart with inline data or a CSV/Excel file path (file param); '
         'the returned "path" (absolute path to the image file) IS the deliverable - '
@@ -112,6 +112,8 @@ def _bins(bins):
         'hist: values = raw samples, bins is an int, "auto", or a strictly '
         'increasing edge array (e.g. [1,10,20]); '
         'box: series = [[group_name, [samples]], ...]; '
+        'violin: same series shape, KDE density shape per group with inner '
+        'IQR bar + median dot, needs >=2 distinct values per group; '
         'heatmap: rows + cols + matrix (2-D numeric). '
         'file (optional): path to a CSV/Excel file (.csv/.xlsx, first row = header) '
         'to read data from - takes precedence over inline data params. '
@@ -124,7 +126,7 @@ def _bins(bins):
         'area with >=2 value columns; pie/donut/rose/waterfall/funnel need col '
         'to pick one); '
         'combo: 1st value col = bars, 2nd = line; '
-        'box: every column = one group of raw samples; '
+        'box/violin: every column = one group of raw samples; '
         'scatter/bubble: columns x, y (, sizes) (, labels); '
         'hist: 1st column = raw samples; '
         'heatmap: 1st column = row names, remaining columns = matrix. '
@@ -237,10 +239,10 @@ def make_chart(
                 return _result(_chart_fn(type)(title, categories,
                                                _norm_series(series), **extra, **common),
                                type, style, animate)
-            if type == 'box':
+            if type in ('box', 'violin'):
                 _require(series is not None,
-                         'box 需要 series=[[组名, [样本...]], ...]')
-                return _result(_chart_fn('box')(title, _norm_series(series), **common),
+                         f'{type} 需要 series=[[组名, [样本...]], ...]')
+                return _result(_chart_fn(type)(title, _norm_series(series), **common),
                                type, style, animate)
             if type in _XY_TYPES:
                 _require(x is not None and y is not None, 'scatter/bubble 需要 x 与 y')
@@ -346,8 +348,8 @@ def _from_file(type, title, file, cat_col, col, sheet, common, *, horizontal, tr
         _require(cols, 'file 至少需要 1 列数值')
         extra = {'stacked': stacked, 'percent': percent} if type == 'bar-multi' else {}
         return done(_chart_fn(type)(title, cats, cols, **extra, **common), type)
-    if type == 'box':
-        return done(_chart_fn('box')(title, file_box_groups(file, sheet), **common),
+    if type in ('box', 'violin'):
+        return done(_chart_fn(type)(title, file_box_groups(file, sheet), **common),
                     type)
     if type == 'hist':
         return done(_chart_fn('hist')(title, file_samples(file, sheet),
