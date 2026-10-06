@@ -435,3 +435,14 @@ def test_batch_no_match_and_sunburst_rejected(tmp_path, capsys):
     assert '未匹配到' in capsys.readouterr().err
     assert cli.main(['batch', 'sunburst', 'x.json', '--out-dir', str(tmp_path)]) == 1
     assert '层级' in capsys.readouterr().err
+
+
+def test_batch_stacked_area_gif(tmp_path):
+    """--stacked / 动画透传:多系列 area 批量出堆积 GIF(堆积折线图)。"""
+    _csv(tmp_path, '1月.csv', '类目,线上,门店\na,1,2\nb,2,1\n')
+    _csv(tmp_path, '2月.csv', '类目,线上,门店\na,3,1\nb,1,2\n')
+    assert cli.main(['batch', 'area', f'{tmp_path}/*.csv', '--stacked',
+                     '--animate', '--fmt', 'gif',
+                     '--out-dir', str(tmp_path)]) == 0
+    _expect_file(tmp_path, 'area_1月.gif')
+    _expect_file(tmp_path, 'area_2月.gif')

@@ -463,7 +463,8 @@ def _expand_files(patterns: list[str]) -> list[Path]:
 
 def _prep_batch_args(args, kind: str, file: Path, title: str) -> None:
     """把 batch 命名空间补成单图 runner 可用的形态:数据源与标题逐文件覆写,
-    类型专属参数全部落为单图默认值(v1 批量不透传类型专属开关)。"""
+    未上收到 batch 参数面的类型专属参数落为单图默认值(--stacked/--percent
+    已是 batch 参数,其余 v1 不透传)。"""
     args.file = str(file)
     args.title = title
     args.data = None
@@ -474,7 +475,6 @@ def _prep_batch_args(args, kind: str, file: Path, title: str) -> None:
     args.lower = args.upper = None
     args.no_total = False
     args.bar_name, args.line_name = '柱状', '折线'
-    args.stacked = args.percent = False
     args.no_value_labels = False
     args.trend = False
     args.bins = '10'
@@ -637,6 +637,10 @@ def _build_parser() -> argparse.ArgumentParser:
                           help='标题模板:{name}=文件名、{i}=序号(从 1 起),默认 "{name}"')
     batch_sp.add_argument('--fail-fast', action='store_true',
                           help='遇错即停(默认逐份继续,最后汇总成败)')
+    batch_sp.add_argument('--stacked', action='store_true',
+                          help='堆积多系列(area / bar-multi;堆积折线图 = area --stacked)')
+    batch_sp.add_argument('--percent', action='store_true',
+                          help='百分比堆积,每类目归一 100%%(隐含 --stacked;同单图)')
     batch_sp.set_defaults(func=_run_batch)
 
     themes_sp = sub.add_parser('themes', help='列出全部主题(按风格包)')
