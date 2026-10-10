@@ -48,6 +48,7 @@ from chartmove.graph.charts.categorical import (
 )
 from chartmove.graph.charts.composition import (
     _pie_like_draw,
+    _rose_draw,
     _sunburst_draw,
     _treemap_draw,
 )
@@ -570,6 +571,51 @@ def test_donut_show_values_false():
         assert any(t.get_text() == 'A' for t in ax.texts)         # 只标类目名
     finally:
         plt.close(fig)
+
+
+def test_pie_family_percent_labels(tmp_path):
+    """pie/donut/rose/treemap/sunburst 的 percent=True:标签追加占合计 %,
+    原始值保留(自动归一,无需预算占比);donut 关数值后只留类目 + 占比。"""
+    fig, ax = plt.subplots()
+    try:
+        _pie_like_draw('t', ['A', 'B'], [70, 30], _theme('business'),
+                       percent=True)(ax, 1.0)
+        texts = [t.get_text() for t in ax.texts]
+        assert 'A 70 (70%)' in texts and 'B 30 (30%)' in texts
+    finally:
+        plt.close(fig)
+    fig, ax = plt.subplots()
+    try:
+        _pie_like_draw('t', ['A', 'B'], [70, 30], _theme('business'),
+                       donut=True, show_values=False, percent=True)(ax, 1.0)
+        assert any(t.get_text() == 'A (70%)' for t in ax.texts)
+    finally:
+        plt.close(fig)
+    fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
+    try:
+        _rose_draw('t', ['a', 'b'], [3, 1], _theme('business'), percent=True)(ax, 1.0)
+        texts = [t.get_text() for t in ax.texts]
+        assert '3 (75%)' in texts and '1 (25%)' in texts
+    finally:
+        plt.close(fig)
+    fig, ax = plt.subplots()
+    try:
+        _treemap_draw('t', ['a', 'b'], [3, 1], _theme('business'), percent=True)(ax, 1.0)
+        assert any(t.get_text() == 'a\n3 (75%)' for t in ax.texts)
+    finally:
+        plt.close(fig)
+    fig, ax = plt.subplots()
+    try:
+        _sunburst_draw('t', [('线上', [('直营', 75), ('分销', 25)])],
+                       _theme('business'), percent=True)(ax, 1.0)
+        texts = [t.get_text() for t in ax.texts]
+        assert '直营 75 (75%)' in texts and '分销 25 (25%)' in texts
+        assert '线上' in texts  # 内环父类目仍只标名
+    finally:
+        plt.close(fig)
+    path, warns = _render(pie, dict(categories=['A', 'B'], values=[70, 30], percent=True),
+                          tmp_path, fmt='png')
+    _assert_ok(path, 'png', warns)  # percent 参数经 pie() 全链路透传
 
 
 def test_theme_metadata():

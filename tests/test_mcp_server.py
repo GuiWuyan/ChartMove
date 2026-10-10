@@ -456,6 +456,17 @@ def test_make_chart_stacked_and_sunburst(tmp_path):
     assert result.is_error
     assert 'hierarchy' in result.content[0].text
 
+    _, result = _call({'type': 'pie', 'title': '饼占比', 'categories': ['A', 'B'],
+                       'values': [70, 30], 'percent': True, 'out_dir': str(tmp_path)})
+    assert not result.is_error
+    Path(json.loads(result.content[0].text)['path']).unlink()
+
+    _, result = _call({'type': 'sunburst', 'title': '层级占比', 'percent': True,
+                       'hierarchy': {'水果': {'苹果': 75, '香蕉': 25}},
+                       'out_dir': str(tmp_path)})
+    assert not result.is_error
+    Path(json.loads(result.content[0].text)['path']).unlink()
+
     _, result = _call({'type': 'pareto', 'title': '二八分析',
                        'categories': ['a', 'b', 'c'], 'values': [5, 3, 2],
                        'out_dir': str(tmp_path)})

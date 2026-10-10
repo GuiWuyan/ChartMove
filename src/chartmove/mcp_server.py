@@ -40,6 +40,7 @@ def _chart_fn(name: str):
 
 _PAIR_TYPES = ('bar', 'line', 'area', 'pie', 'donut', 'waterfall', 'funnel', 'rose',
                'treemap', 'pareto')
+_SHARE_TYPES = ('pie', 'donut', 'rose', 'treemap')  # percent=true 标签追加占合计 %
 _SERIES_TYPES = ('line-multi', 'bar-multi', 'radar')
 _XY_TYPES = ('scatter', 'bubble')
 
@@ -106,6 +107,9 @@ def _bins(bins):
         'normalizes each category to 100% (implies stacked); '
         'area with series: multi-series by default translucent overlaid, '
         'stacked=true layered stacking, percent=true 100% stacked; '
+        'pie/donut/rose/treemap/sunburst: percent=true computes each part\'s '
+        'share of the total from raw values and appends it to the label '
+        '(e.g. "A 70 (70%)"), no pre-computation needed; '
         'sunburst (two-level hierarchical composition): hierarchy = '
         '{parent: {child: value}, ...} (list of [parent, {child: value}] pairs '
         'also accepted), inner ring = parents (value = sum of children), '
@@ -236,7 +240,9 @@ def make_chart(
                     return _result(_chart_fn('waterfall')(title, categories, values,
                                                           total=total, **common),
                                    type, style, animate)
-                return _result(_chart_fn(type)(title, categories, values, **common),
+                extra = {'percent': percent} if type in _SHARE_TYPES else {}
+                return _result(_chart_fn(type)(title, categories, values,
+                                               **extra, **common),
                                type, style, animate)
             if type == 'combo':
                 _require(categories is not None and values is not None
@@ -307,7 +313,8 @@ def make_chart(
                 _require(hierarchy is not None,
                          'sunburst 需要 hierarchy(两级层级数据,'
                          '如 {"水果": {"苹果": 30}})')
-                return _result(_chart_fn('sunburst')(title, hierarchy, **common),
+                return _result(_chart_fn('sunburst')(title, hierarchy, percent=percent,
+                                                     **common),
                                type, style, animate)
             raise ToolError(f'未知图表类型 {type!r},'
                             f'可选:{", ".join(get_args(ChartType))}')
@@ -359,7 +366,8 @@ def _from_file(type, title, file, cat_col, col, sheet, common, *, horizontal, tr
         if type == 'waterfall':
             return done(_chart_fn('waterfall')(title, cats, cols[0][1],
                                                total=total, **common), type)
-        return done(_chart_fn(type)(title, cats, cols[0][1], **common), type)
+        extra = {'percent': percent} if type in _SHARE_TYPES else {}
+        return done(_chart_fn(type)(title, cats, cols[0][1], **extra, **common), type)
     if type == 'combo':
         cats, cols = file_columns(file, cat_col, col, sheet)
         _require(len(cols) == 2,

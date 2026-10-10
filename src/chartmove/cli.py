@@ -272,7 +272,8 @@ def _run_sunburst(kind, args):
     if d is None:
         raise ValueError('sunburst 需要 --data 传两级层级 JSON,'
                          '如 \'{"水果": {"苹果": 30}}\'(也可含 hierarchy 字段)')
-    return fn(args.title, d.get('hierarchy', d), **_common_kwargs(args))
+    return fn(args.title, d.get('hierarchy', d), percent=args.percent,
+              **_common_kwargs(args))
 
 
 def _run_samples(kind, args):
@@ -410,12 +411,15 @@ def _run_sankey(kind, args):
 def _default_run(kind, args):
     fn = _chart_fn(kind)
     kw = _common_kwargs(args)
+    # --percent 仅饼家族(pie/donut/rose/treemap)注册;pareto/funnel 共用本 runner
+    # 但无此参数,getattr 兜底保证不误传
+    extra = {'percent': True} if getattr(args, 'percent', False) else {}
     if args.file:
         cats, cols = _file_cols(args)
         _one_col(cols, args.type)
-        return fn(args.title, cats, cols[0][1], **_sample_kw(args), **kw)
+        return fn(args.title, cats, cols[0][1], **extra, **_sample_kw(args), **kw)
     cats, vals = _pairs_or_json(args)
-    return fn(args.title, cats, vals, **_sample_kw(args), **kw)
+    return fn(args.title, cats, vals, **extra, **_sample_kw(args), **kw)
 
 
 _RUNNERS = {
@@ -624,6 +628,11 @@ def _build_parser() -> argparse.ArgumentParser:
     sps['line'].add_argument('--lower',
                              help='区间带下界,逗号分隔(与 --upper 成对使用)')
     sps['line'].add_argument('--upper', help='区间带上界,逗号分隔')
+    for name in ('pie', 'donut', 'rose', 'treemap'):
+        sps[name].add_argument('--percent', action='store_true',
+                               help='标签追加占合计 %%(原始值保留,自动归一,如 120 (31%%))')
+    sps['sunburst'].add_argument('--percent', action='store_true',
+                                 help='外环子类目标签追加占合计 %%')
 
     batch_sp = sub.add_parser('batch',
                               help='批量出图:每份 CSV/Excel 各生成一张同类型图表')
@@ -640,7 +649,8 @@ def _build_parser() -> argparse.ArgumentParser:
     batch_sp.add_argument('--stacked', action='store_true',
                           help='堆积多系列(area / bar-multi;堆积折线图 = area --stacked)')
     batch_sp.add_argument('--percent', action='store_true',
-                          help='百分比堆积,每类目归一 100%%(隐含 --stacked;同单图)')
+                          help='百分比堆积(bar-multi / area)或标签追加占比'
+                               '(pie / donut / rose / treemap),同单图')
     batch_sp.set_defaults(func=_run_batch)
 
     themes_sp = sub.add_parser('themes', help='列出全部主题(按风格包)')
