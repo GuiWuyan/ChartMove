@@ -85,6 +85,19 @@ def test_bar_multi_stacked_flags(tmp_path):
     _expect_file(tmp_path, 'bar_multi_占比.png')
 
 
+def test_pie_family_percent_flags(tmp_path):
+    """--percent 透传饼家族:标签追加占合计 %,出图不炸。"""
+    _run(tmp_path, 'pie', '占比', 'A=70', 'B=30', '--percent')
+    _expect_file(tmp_path, 'pie_占比.png')
+    _run(tmp_path, 'rose', '玫瑰占比', 'A=70', 'B=30', '--percent')
+    _expect_file(tmp_path, 'rose_玫瑰占比.png')
+    _run(tmp_path, 'treemap', '树占比', 'A=70', 'B=30', '--percent')
+    _expect_file(tmp_path, 'treemap_树占比.png')
+    _run(tmp_path, 'sunburst', '层级占比', '--data',
+         json.dumps({'水果': {'苹果': 75, '香蕉': 25}}), '--percent')
+    _expect_file(tmp_path, 'sunburst_层级占比.png')
+
+
 def test_area_stacked_flags(tmp_path, capsys):
     """area 多系列:--series 叠加 / --stacked 堆积 / --file 多数值列自动升级。"""
     _run(tmp_path, 'area', '叠加', '--categories', 'a,b,c', '--series',

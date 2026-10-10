@@ -14,7 +14,12 @@ from ..style import _has_spread, _legend_bottom, _nf, _squarify, _style, _theme
 from ..validate import _validate, _validate_hierarchy
 
 
-def _pie_like_draw(title, cats, vals, th, donut=False, show_values=True):
+def _share(v: float, total: float, on: bool) -> str:
+    """占比后缀 ' (31%)':取整到个位,与 bar-multi 段内标注、funnel 逐级转化率同格式。"""
+    return f' ({v / total * 100:.0f}%)' if on else ''
+
+
+def _pie_like_draw(title, cats, vals, th, donut=False, show_values=True, percent=False):
     def draw(ax, p):
         ax.set_facecolor(th['face'])  # 深色主题下避免露出白色圆形面板
         total = sum(vals) or 1
@@ -26,7 +31,8 @@ def _pie_like_draw(title, cats, vals, th, donut=False, show_values=True):
             start += a
         if sum(vis) <= 0:
             vis[0] = 1e-6  # p=0 时 pie 不接受全 0
-        labels = [(f'{c} {_nf(v, th)}' if show_values else c) if v > 0 else ''
+        labels = [(f'{c} {_nf(v, th)}' if show_values else c) + _share(v, total, percent)
+                  if v > 0 else ''
                   for c, v in zip(cats, vals)]
         wedges = dict(edgecolor='white', linewidth=2)
         if donut:
@@ -47,13 +53,13 @@ def _pie_like_draw(title, cats, vals, th, donut=False, show_values=True):
 
 def pie(title: str, categories, values, *, style='business', animate=False, fmt=None, loop=False,
         out: str | None = None, out_dir=None, figsize=None, dpi=None, numfmt='auto',
-        note: str | None = None) -> Path:
-    """饼图(values 需 >=0);animate=True 扇区展开。"""
+        note: str | None = None, percent=False) -> Path:
+    """饼图(values 需 >=0);percent=True 标签追加占合计 %;animate=True 扇区展开。"""
     cats, vals = _validate(categories, values)
     if min(vals) < 0:
         raise ValueError('饼图 values 需 >=0')
     th = _theme(style, numfmt, note)
-    return _render('pie', title, _pie_like_draw(title, cats, vals, th),
+    return _render('pie', title, _pie_like_draw(title, cats, vals, th, percent=percent),
                    animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)
 
@@ -61,21 +67,24 @@ def pie(title: str, categories, values, *, style='business', animate=False, fmt=
 def donut(title: str, categories, values, *, show_values=True, style='business',
           animate=False, fmt=None, loop=False, out: str | None = None, out_dir=None,
           figsize=None, dpi=None, numfmt='auto',
-          note: str | None = None) -> Path:
-    """环形图:外部"类目 数值"标注 + 底部图例;animate=True 扇区展开。"""
+          note: str | None = None, percent=False) -> Path:
+    """环形图:外部"类目 数值"标注 + 底部图例;percent=True 标注追加占合计 %;
+    animate=True 扇区展开。"""
     cats, vals = _validate(categories, values)
     if min(vals) < 0:
         raise ValueError('环形图 values 需 >=0')
     th = _theme(style, numfmt, note)
-    return _render('donut', title, _pie_like_draw(title, cats, vals, th, donut=True,
-                                                  show_values=show_values),
+    return _render('donut', title,
+                   _pie_like_draw(title, cats, vals, th, donut=True,
+                                  show_values=show_values, percent=percent),
                    animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)
 
 
-def _rose_draw(title, cats, vals, th):
+def _rose_draw(title, cats, vals, th, percent=False):
     """玫瑰图(Nightingale):极坐标柱状,半径即数值;第一扇区朝正上、顺时针。"""
     n = len(vals)
+    total = sum(vals) or 1.0
     thetas = [2 * math.pi * i / n for i in range(n)]
     width = 2 * math.pi / n * 0.86  # 扇区间留缝
 
@@ -91,7 +100,8 @@ def _rose_draw(title, cats, vals, th):
         ax.bar(thetas, hs, width=width, color=cols, edgecolor=th['face'], linewidth=1.5)
         for i, t in enumerate(thetas):
             if vals[i] > 0 and _stagger(p, i, n) > 0.5:
-                ax.text(t, hs[i] + max(vals) * 0.05, _nf(vals[i], th),
+                ax.text(t, hs[i] + max(vals) * 0.05,
+                        _nf(vals[i], th) + _share(vals[i], total, percent),
                         ha='center', va='bottom', fontsize=12, color=th['text'])
         ax.set_xticks(thetas)
         ax.set_xticklabels(cats, fontsize=13, color=th['text'])
@@ -109,18 +119,18 @@ def _rose_draw(title, cats, vals, th):
 def rose(title: str, categories, values, *, style='business', animate=False, fmt=None,
          loop=False, out: str | None = None, out_dir=None,
          figsize=None, dpi=None, numfmt='auto',
-         note: str | None = None) -> Path:
-    """玫瑰图(Nightingale 极坐标柱状,values 需 >=0):半径即数值。"""
+         note: str | None = None, percent=False) -> Path:
+    """玫瑰图(Nightingale 极坐标柱状,values 需 >=0):半径即数值;percent=True 标签追加占合计 %。"""
     cats, vals = _validate(categories, values)
     if min(vals) < 0:
         raise ValueError('玫瑰图 values 需 >=0,含正负增减的数据请用 waterfall')
     th = _theme(style, numfmt, note)
-    return _render('rose', title, _rose_draw(title, cats, vals, th),
+    return _render('rose', title, _rose_draw(title, cats, vals, th, percent),
                    animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    polar=True, th=th, figsize=figsize, dpi=dpi)
 
 
-def _sunburst_draw(title, hierarchy, th):
+def _sunburst_draw(title, hierarchy, th, percent=False):
     """旭日图:内环 = 父类目(值 = 子类目合计),外环 = 子类目按父色向底色渐变;
     动画与饼图同款:两环随总扫过角同步展开,标签随所在扇区扫过渐次浮现。"""
     total = sum(v for _, kids in hierarchy for _, v in kids) or 1.0
@@ -179,7 +189,7 @@ def _sunburst_draw(title, hierarchy, th):
             if v > 0 and sweep - off > a * 0.5:
                 theta = math.radians(90 - (off + a / 2))
                 x, y = 1.10 * math.cos(theta), 1.10 * math.sin(theta)
-                ax.text(x, y, f'{cname} {_nf(v, th)}',
+                ax.text(x, y, f'{cname} {_nf(v, th)}' + _share(v, total, percent),
                         ha='center' if abs(x) < 0.4 else ('left' if x > 0 else 'right'),
                         va='center', fontsize=12, color=th['text'])
             off += a
@@ -191,17 +201,17 @@ def _sunburst_draw(title, hierarchy, th):
 
 def sunburst(title: str, hierarchy, *, style='business', animate=False, fmt=None, loop=False,
              out: str | None = None, out_dir=None, figsize=None, dpi=None, numfmt='auto',
-             note: str | None = None) -> Path:
+             note: str | None = None, percent=False) -> Path:
     """旭日图(两级层级占比):hierarchy = {父类目: {子类目: 数值}},内环父类目
-    (值 = 子值合计)、外环子类目;数值需 >=0 且有正值。"""
+    (值 = 子值合计)、外环子类目(percent=True 外环标签追加占合计 %);数值需 >=0 且有正值。"""
     hh = _validate_hierarchy(hierarchy)
     th = _theme(style, numfmt, note)
-    return _render('sunburst', title, _sunburst_draw(title, hh, th),
+    return _render('sunburst', title, _sunburst_draw(title, hh, th, percent),
                    animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)
 
 
-def _treemap_draw(title, cats, vals, th):
+def _treemap_draw(title, cats, vals, th, percent=False):
     pairs = sorted([(c, v) for c, v in zip(cats, vals) if v > 0],
                    key=lambda cv: cv[1], reverse=True)  # 降序才出好比例
     total = sum(v for _, v in pairs) or 1.0
@@ -223,7 +233,8 @@ def _treemap_draw(title, cats, vals, th):
             if pr > 0.5 and rw > 1.2 and rh > 0.62:  # 格子够大才标文字
                 r, g, b = to_rgb(color)
                 tc = '#111111' if 0.299 * r + 0.587 * g + 0.114 * b > 0.6 else '#ffffff'
-                ax.text(cx, cy, f'{cat}\n{_nf(v, th)}', ha='center', va='center',
+                ax.text(cx, cy, f'{cat}\n{_nf(v, th)}' + _share(v, total, percent),
+                        ha='center', va='center',
                         fontsize=14, color=tc,
                         path_effects=[Normal()])  # 覆盖 sketch 的 rc 白描边,否则色块内白字糊死
         ax.set_xlim(0, 16.0)
@@ -234,14 +245,15 @@ def _treemap_draw(title, cats, vals, th):
 def treemap(title: str, categories, values, *, style='business', animate=False, fmt=None,
             loop=False, out: str | None = None, out_dir=None,
             figsize=None, dpi=None, numfmt='auto',
-            note: str | None = None) -> Path:
-    """矩形树图:面积即占比,values 需 >=0 且有正值;按值降序 squarify 布局。"""
+            note: str | None = None, percent=False) -> Path:
+    """矩形树图:面积即占比,values 需 >=0 且有正值;按值降序 squarify 布局;
+    percent=True 格内标签追加占合计 %。"""
     cats, vals = _validate(categories, values)
     if min(vals) < 0:
         raise ValueError('矩形树图 values 需 >=0,含正负增减的数据请用 waterfall')
     if max(vals) <= 0:
         raise ValueError('矩形树图 values 需有正值(面积即占比)')
     th = _theme(style, numfmt, note)
-    return _render('treemap', title, _treemap_draw(title, cats, vals, th),
+    return _render('treemap', title, _treemap_draw(title, cats, vals, th, percent),
                    animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)
