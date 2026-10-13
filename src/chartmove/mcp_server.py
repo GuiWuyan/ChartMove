@@ -23,6 +23,7 @@ from .table import (
 )
 from .themes import THEME_DESCS, THEME_LABELS, THEME_PACKS, THEMES
 
+# 24 种图表类型与 5 种输出格式(与 CLI _CHART_TYPES / render 的格式表对应)
 ChartType = Literal[
     'bar', 'line', 'line-multi', 'area', 'pie', 'donut', 'combo', 'bar-multi',
     'radar', 'scatter', 'bubble', 'hist', 'box', 'violin', 'heatmap', 'waterfall',
@@ -39,10 +40,10 @@ def _chart_fn(name: str):
     return getattr(graph, name.replace('-', '_'))
 
 _PAIR_TYPES = ('bar', 'line', 'area', 'pie', 'donut', 'waterfall', 'funnel', 'rose',
-               'treemap', 'pareto')
+               'treemap', 'pareto')            # categories + values 型
 _SHARE_TYPES = ('pie', 'donut', 'rose', 'treemap')  # percent=true 标签追加占合计 %
-_SERIES_TYPES = ('line-multi', 'bar-multi', 'radar')
-_XY_TYPES = ('scatter', 'bubble')
+_SERIES_TYPES = ('line-multi', 'bar-multi', 'radar')  # categories + series 型
+_XY_TYPES = ('scatter', 'bubble')               # x/y 数值对型
 
 server = MCPServer(
     name='chartmove',
@@ -62,6 +63,7 @@ server = MCPServer(
 
 
 def _require(cond, message: str) -> None:
+    """参数校验统一出口:条件不满足即抛中文 ToolError(模型可直接读懂并改参)。"""
     if not cond:
         raise ToolError(message)
 
@@ -202,6 +204,8 @@ def make_chart(
     col: str | None = None,
     sheet: str | None = None,
 ) -> str:
+    """出图工具主入口:按 type 分发到 graph 内核,file 数据优先于内联参数;
+    内核中文校验错误在此统一转 ToolError。参数语义见上方 description(英文,给模型)。"""
     if style not in THEMES:  # 入口即校验:错误主题不许静默兜底成 business 再回显假答案
         raise ToolError(f'未知主题 {style!r};可选:{", ".join(THEMES)}')
     bins = _bins(bins)  # hist 专用:整数 / 'auto' / 严格递增边界(非法给中文错)
@@ -420,6 +424,7 @@ def _from_file(type, title, file, cat_col, col, sheet, common, *, horizontal, tr
 
 
 def _result(path, chart_type: str, style: str, animated: bool) -> str:
+    """统一返回 JSON:{path(绝对路径,即交付物), file_size, type, style, animated}。"""
     path = Path(path)
     return json.dumps({'path': str(path), 'file_size': path.stat().st_size,
                        'type': chart_type, 'style': style, 'animated': animated},
@@ -440,6 +445,7 @@ def _result(path, chart_type: str, style: str, animated: bool) -> str:
     ),
 )
 def list_themes(preview: bool = False, out_dir: str | None = None) -> str:
+    """列主题工具:纯文本输出,不拉起 matplotlib;preview=true 追加拼版预览图路径。"""
     lines = []
     for pack, members in THEME_PACKS.items():
         lines.append(f'[{pack}]')
@@ -453,6 +459,7 @@ def list_themes(preview: bool = False, out_dir: str | None = None) -> str:
 
 
 def main() -> None:
+    """stdio 入口(pyproject 的 chartmove-mcp 脚本指向这里)。"""
     server.run()  # stdio
 
 

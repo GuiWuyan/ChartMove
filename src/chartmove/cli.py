@@ -25,8 +25,8 @@ from .table import (
 )
 from .themes import THEME_DESCS, THEME_LABELS, THEME_PACKS, THEMES
 
-_MULTI_TYPES = ('line-multi', 'bar-multi', 'radar')
-_XY_TYPES = ('scatter', 'bubble')
+_MULTI_TYPES = ('line-multi', 'bar-multi', 'radar')   # categories + series 型
+_XY_TYPES = ('scatter', 'bubble')                     # x/y 数值对型
 
 # (类型名, help, items_help):单图子命令与 batch 共用这份清单
 _CHART_TYPES = (
@@ -78,15 +78,18 @@ def _load_json(src: str):
 
 
 def _num_list(src) -> list[float]:
+    """逗号分隔数值串 → float 列表(中英文逗号均可,空项剔除)。"""
     return [parse_float(v, '(逗号分隔列表)')
             for v in str(src).replace('，', ',').split(',') if v.strip()]
 
 
 def _str_list(src) -> list[str]:
+    """逗号分隔字符串 → 列表(中英文逗号均可,空项剔除)。"""
     return [v for v in str(src).replace('，', ',').split(',') if v.strip()]
 
 
 def _parse_pairs(items: list[str]) -> tuple[list[str], list[float]]:
+    """位置数据 `类目=数值` 序列 → (类目, 数值) 两个列表。"""
     cats, vals = [], []
     for it in items:
         k, _, v = it.partition('=')
@@ -110,6 +113,7 @@ def _norm_series(raw) -> list[tuple[str, list[float]]]:
 
 
 def _figsize(text: str | None):
+    """'宽x高'(x / X / * 分隔均可)→ (宽, 高);未给返回 None(用内核默认)。"""
     if not text:
         return None
     for sep in ('x', 'X', '*'):
@@ -121,6 +125,7 @@ def _figsize(text: str | None):
 
 
 def _common_kwargs(args) -> dict:
+    """各 runner 共用的展示参数包(主题/动画/格式/输出等),原样 ** 透传内核。"""
     return dict(style=args.style, animate=args.animate, fmt=args.fmt, out=args.out,
                 out_dir=args.out_dir, loop=args.loop, numfmt=args.numfmt, note=args.note,
                 figsize=_figsize(args.figsize), dpi=args.dpi)
@@ -132,6 +137,7 @@ def _sample_kw(args) -> dict:
 
 
 def _pairs_or_json(args) -> tuple[list[str], list[float]]:
+    """类目型数据入口:--data JSON(categories + values)优先,其次位置 类目=值。"""
     if args.data:
         d = _load_json(args.data)
         try:
@@ -145,6 +151,7 @@ def _pairs_or_json(args) -> tuple[list[str], list[float]]:
 
 
 def _series_or_json(args):
+    """多系列数据入口:--data JSON(categories + series)或 --categories + --series JSON。"""
     if args.data:
         d = _load_json(args.data)
         try:
@@ -167,6 +174,7 @@ def _file_cols(args, min_cols=1):
 
 
 def _one_col(cols, t):
+    """要求 --file 恰好 1 列数值的类型(pie 家族/waterfall 等)统一在此拦截。"""
     if len(cols) != 1:
         raise ValueError(f'{t} 只支持 1 列数值,--file 里有 {len(cols)} 列'
                          '(可用 --col 指定其中一列)')
@@ -175,6 +183,7 @@ def _one_col(cols, t):
 # ---------- 各类型的运行逻辑 ----------
 
 def _run_bar(kind, args):
+    """bar:--file 多数值列自动升级 bar-multi;单列按 --horizontal 出柱状/条形。"""
     fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     if args.file:
@@ -188,6 +197,8 @@ def _run_bar(kind, args):
 
 
 def _run_line(kind, args):
+    """line:--file 多数值列自动升级 line-multi;区间带 --lower/--upper 仅单系列;
+    图例名取列表头(内联数据用默认名)。"""
     fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     band = {'lower': _num_list(args.lower) if args.lower else None,
@@ -207,6 +218,7 @@ def _run_line(kind, args):
 
 
 def _run_waterfall(kind, args):
+    """waterfall:--no-total 去合计柱;数据同类目型(位置对或 --data/--file)。"""
     fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     if args.file:
@@ -218,6 +230,8 @@ def _run_waterfall(kind, args):
 
 
 def _run_combo(kind, args):
+    """combo:--file 取 2 列数值(第 1 列柱值、第 2 列折线值);
+    否则位置数据作柱值,折线值必填 --line。"""
     fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     if args.file:  # 类目列之后的第 1 列柱值、第 2 列折线值
@@ -234,6 +248,8 @@ def _run_combo(kind, args):
 
 
 def _run_multi(kind, args):
+    """line-multi / bar-multi / radar 共用:--file 各数值列 = 一个系列,
+    或 --categories + --series JSON;--no-value-labels 仅折线有效。"""
     fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     if args.file:
@@ -247,6 +263,8 @@ def _run_multi(kind, args):
 
 
 def _run_area(kind, args):
+    """area:单系列(位置对 / --data values)或多系列(--series / --file 多数值列,
+    可 --stacked/--percent);--data 里出现 series 字段即按多系列走。"""
     fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     sp = {'stacked': args.stacked, 'percent': args.percent}
@@ -265,6 +283,7 @@ def _run_area(kind, args):
 
 
 def _run_sunburst(kind, args):
+    """sunburst:仅 --data 层级 JSON(顶层直接是 hierarchy,或含 hierarchy 字段)。"""
     if args.file:
         raise ValueError('sunburst 暂不支持 --file(层级数据请用 --data 传 JSON)')
     fn = _chart_fn(kind)
@@ -288,6 +307,8 @@ def _run_samples(kind, args):
 
 
 def _run_xy(kind, args):
+    """scatter / bubble 共用(args.type 区分):--file 列序 x, y(, sizes)(, labels),
+    或 --x/--y(--labels/--sizes);--trend 仅散点有效。"""
     fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     if args.file:  # 列顺序:x, y(, sizes)(, labels)
@@ -330,6 +351,7 @@ def _bins(text: str):
 
 
 def _run_hist(kind, args):
+    """hist:原始样本来自位置参数 / --data values / --file 第 1 列,--bins 见 _bins。"""
     fn = _chart_fn(kind)
     bins = _bins(args.bins)
     kw = _common_kwargs(args)
@@ -346,6 +368,8 @@ def _run_hist(kind, args):
 
 
 def _run_heatmap(kind, args):
+    """heatmap:--file(类目列=行名,其余列=矩阵)或 --data(rows/cols/values);
+    --no-annotate 关闭格内数值。"""
     fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     if args.file:  # 类目列=行名(默认第 1 列),其余列为矩阵
@@ -361,6 +385,8 @@ def _run_heatmap(kind, args):
 
 
 def _run_gantt(kind, args):
+    """gantt:--categories + --starts + --ends,或 --file 2 列数值(开始、结束),
+    或 --data JSON(tasks/categories、starts、ends)。"""
     fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     if args.file:  # 2 个数值列 = 开始、结束
@@ -381,6 +407,7 @@ def _run_gantt(kind, args):
 
 
 def _run_dumbbell(kind, args):
+    """dumbbell:--series 恰 2 系列(期初/期末)或 --file 2 列数值;--slope 切坡度图。"""
     fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     slope = getattr(args, 'slope', False)
@@ -395,6 +422,7 @@ def _run_dumbbell(kind, args):
 
 
 def _run_sankey(kind, args):
+    """sankey:--data links JSON(顶层是列表或含 links 字段)或 --file 3 列(源、目标、数值)。"""
     fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     if args.file:  # 3 列:源、目标、数值
@@ -409,6 +437,8 @@ def _run_sankey(kind, args):
 
 
 def _default_run(kind, args):
+    """无专属 runner 的类目型类型(pie/donut/rose/treemap/pareto/funnel)的默认路径:
+    --percent 仅饼家族透传,数据走 --file 单列或位置对/--data。"""
     fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     # --percent 仅饼家族(pie/donut/rose/treemap)注册;pareto/funnel 共用本 runner
@@ -422,6 +452,7 @@ def _default_run(kind, args):
     return fn(args.title, cats, vals, **extra, **_sample_kw(args), **kw)
 
 
+# 类型名 → runner;不在表里的类型走 _default_run(注册新类型时两处同步)
 _RUNNERS = {
     'bar': _run_bar,
     'line': _run_line,
@@ -491,6 +522,8 @@ def _prep_batch_args(args, kind: str, file: Path, title: str) -> None:
 
 
 def _run_batch(args) -> int:
+    """batch 主流程:标题模板逐文件套用,复用单图 runner;单份失败默认继续,
+    --fail-fast 遇错即停;成败汇总进退出码。"""
     kind = args.type
     if kind == 'sunburst':
         raise ValueError('sunburst 需要层级 JSON(--data),没有按数据文件批量的形态')
@@ -516,6 +549,7 @@ def _run_batch(args) -> int:
 
 
 def _themes_cmd(args) -> int:
+    """themes 子命令:按风格包列出全部主题;--preview 追加出拼版预览图。"""
     for pack, members in THEME_PACKS.items():
         print(f'{pack}:')
         for key in members:
@@ -558,6 +592,8 @@ def _add_shared_opts(p, *, out=True, data_src=True) -> None:
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    """组装子命令:24 个单图类型共用 common 参数面,再按类型挂专属参数;
+    每个子命令把 (runner, 类型名) 绑进 defaults,main 只管调用。"""
     ap = argparse.ArgumentParser(
         prog='chartmove', description='中文数据图表生成器(默认输出 ./Results/)')
     ap.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
@@ -663,6 +699,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> int:
+    """CLI 入口:解析子命令并分发;中文校验错误统一转 stderr 提示 + 退出码 1。"""
     # 非 tty 管道下,非中文 locale(如 cp1252)编不了中文会直接 UnicodeEncodeError:
     # 降级为替换字符而非崩溃;交互终端与 utf-8 环境不受影响(PLAN §4-3)
     for stream in (sys.stdout, sys.stderr):

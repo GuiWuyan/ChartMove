@@ -31,6 +31,8 @@ from ..validate import (
 
 
 def _scatter_draw(title, xs, ys, th, name='数值', trend=False, labels=None):
+    """散点绘制闭包:逐点浮现,最大/最小 y 点过线即高亮;trend=True 叠加
+    最小二乘趋势线(虚线,随整体进度渐显);labels 逐点标注在点上方。"""
     n = len(xs)
 
     def draw(ax, p):
@@ -86,6 +88,8 @@ def scatter(title: str, xs, ys, *, name='数值', trend=False, labels=None,
 
 
 def _bubble_draw(title, xs, ys, sizes, th, name='数值', labels=None):
+    """气泡绘制闭包:sizes 线性归一到 80~1480 pt² 气泡面积(全等时取中档),
+    颜色按点轮换主题色板;labels 逐点标注在点上方。"""
     n = len(xs)
     smin, smax = min(sizes), max(sizes)
 
@@ -135,6 +139,8 @@ def bubble(title: str, xs, ys, sizes, *, name='数值', labels=None, style='busi
 
 
 def _hist_draw(title, vals, bins, th):
+    """直方图绘制闭包:一次性预分箱,逐箱错峰升起,最高频箱用 hi_max 高亮;
+    y 是频数计数不做数值格式化,x 轴(分箱边界)跟随 numfmt。"""
     heights, edges = np.histogram(vals, bins=bins)
     centers = (edges[:-1] + edges[1:]) / 2
     widths = np.diff(edges)
@@ -166,6 +172,9 @@ def hist(title: str, values, *, bins=10, style='business', animate=False, fmt=No
 
 
 def _box_draw(title, series, th):
+    """箱线绘制闭包:预计算五数(触须取 1.5×IQR 内极值,不画离群点),
+    动画 = 各箱从中位数向外展开(保持 q1<=med<=q3 单调);
+    x 轴从首帧钉在最终范围。"""
     stats = []
     for nm, samples in series:
         a = np.asarray(samples, dtype=float)
@@ -274,6 +283,9 @@ def violin(title: str, series, *, style='business', animate=False, fmt=None, loo
 
 
 def _heatmap_draw(title, rows, cols, arr, th, annotate=True):
+    """热力绘制闭包:色带 = 底色→主色→hi_max(常值矩阵 vmin+1 兜底),
+    格子按列先后淡入;annotate 且 ≤25 格时标数值(文字色按格子亮度自适应),
+    最大/最小格描边随所在格一起淡入。"""
     cmap = LinearSegmentedColormap.from_list(
         'chartmove_seq', [th['face'], th['palette'][0], th['hi_max']])
     vmin, vmax = float(arr.min()), float(arr.max())

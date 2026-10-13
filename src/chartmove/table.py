@@ -131,6 +131,7 @@ def file_links(path, sheet=None) -> list[tuple[str, str, float]]:
 
 
 def _read_csv(path) -> tuple[list[str], list[list[str]]]:
+    """UTF-8(-sig)/GBK 依次试解;剔除全空行,单元格去首尾空白。"""
     raw = Path(path).read_bytes()
     for enc in ('utf-8-sig', 'gbk'):
         try:
@@ -147,6 +148,7 @@ def _read_csv(path) -> tuple[list[str], list[list[str]]]:
 
 
 def _read_excel(path, sheet=None) -> tuple[list[str], list[list[str]]]:
+    """openpyxl 只读模式取活动表(或 sheet 指定表);None 单元格转空串,剔除全空行。"""
     try:
         from openpyxl import load_workbook
     except ImportError as e:  # 延迟导入:纯 CSV 路径不付 openpyxl 的导入成本(包声明为硬依赖)

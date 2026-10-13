@@ -69,7 +69,7 @@ def _expect_file(tmp_path, filename: str) -> None:
                                       ['储蓄', '投资', 120]]}))),
 ])
 def test_cli_all_types(name, argv, tmp_path):
-    """验收主体:22 种类型各一条命令出图。"""
+    """验收主体:24 种类型各一条命令出图。"""
     _run(tmp_path, *argv)
     _expect_png(tmp_path, name.replace('-', '_'))
 

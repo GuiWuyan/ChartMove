@@ -20,6 +20,9 @@ def _share(v: float, total: float, on: bool) -> str:
 
 
 def _pie_like_draw(title, cats, vals, th, donut=False, show_values=True, percent=False):
+    """饼 / 环形共用绘制闭包:扇区随总扫过角同步展开(与旭日图同款动画);
+    "类目 数值(占比)"走外置标签,扇区内不重复标注(小扇区也不丢数),
+    零值扇区不出标签。"""
     def draw(ax, p):
         ax.set_facecolor(th['face'])  # 深色主题下避免露出白色圆形面板
         total = sum(vals) or 1
@@ -212,6 +215,8 @@ def sunburst(title: str, hierarchy, *, style='business', animate=False, fmt=None
 
 
 def _treemap_draw(title, cats, vals, th, percent=False):
+    """树图绘制闭包:正值项按值降序 squarify 布局(面积即占比),逐格从自身中心
+    浮现;格子够大才标"类目 数值(占比)",文字色按格子亮度自适应。"""
     pairs = sorted([(c, v) for c, v in zip(cats, vals) if v > 0],
                    key=lambda cv: cv[1], reverse=True)  # 降序才出好比例
     total = sum(v for _, v in pairs) or 1.0

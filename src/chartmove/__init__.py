@@ -22,6 +22,7 @@ _CHART_EXPORTS = frozenset({
 
 
 def __getattr__(name: str):
+    """PEP 562 惰性导出:图表函数首次取属性时才加载 graph(matplotlib 内核)。"""
     if name in _CHART_EXPORTS:
         from . import graph
         return getattr(graph, name)
@@ -29,4 +30,5 @@ def __getattr__(name: str):
 
 
 def __dir__() -> list[str]:
+    """把惰性导出名并进 dir() 结果,补全工具与 dir(chartmove) 看到完整公开面。"""
     return sorted(set(globals()) | _CHART_EXPORTS)

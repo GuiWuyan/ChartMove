@@ -56,6 +56,9 @@ class _GifWriter(animation.PillowWriter):
 def _render(kind, title, draw, *, animate, fmt, out, out_dir=None, loop=False,
             polar: bool = False, figsize=None, dpi=None,
             th: dict | None = None) -> Path:
+    """全部图表的统一渲染出口:animate=True 走 FuncAnimation 出 GIF / MP4,
+    否则单帧 draw(ax, 1.0) 出 png / pdf / tif;产物先 claim_path 原子占位,
+    渲染失败即删占位文件不留 0 字节垃圾。"""
     th = th or {}
     face = th.get('face', 'white')
     fig_face = th.get('fig_face') or face

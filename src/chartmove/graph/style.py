@@ -18,6 +18,7 @@ MARKER_CAP = 50         # 折线标记数上限:超过则隔点绘制(markevery)
 
 
 def _style(ax, title: str, th: dict, grid_axis: str | None = None) -> None:
+    """统一坐标轴外观:标题、脊线、网格、刻度按主题着色;grid_axis 覆盖主题默认。"""
     ax.set_title(title, fontsize=20, pad=18, color=th['text'])
     # spines:'box' 四边框,'none' 全去,默认藏顶右
     hide = {'box': (), 'none': ('top', 'right', 'left', 'bottom')}.get(
@@ -88,6 +89,7 @@ def _xticks(ax, cats: list[str], th: dict) -> bool:
 
 
 def _has_spread(vals: list[float]) -> bool:
+    """数据有差异(≥2 个且不全等)才做最大/最小高亮,全等序列高亮无意义。"""
     return len(vals) >= 2 and max(vals) != min(vals)
 
 

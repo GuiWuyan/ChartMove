@@ -24,6 +24,8 @@ from ..validate import _validate, _validate_series
 
 
 def _bar_draw(title, cats, vals, th, horizontal=False):
+    """柱状 / 横向条形共用绘制闭包:柱体逐根错峰生长,过半后浮现数值标签;
+    有差距时最大/最小值分别换 hi_max / hi_min 高亮。"""
     def draw(ax, p):
         _style(ax, title, th, grid_axis='x' if horizontal else None)
         hs = [v * _stagger(p, i, len(vals)) for i, v in enumerate(vals)]
@@ -69,6 +71,8 @@ def bar(title: str, categories, values, *, style='business', animate=False, fmt=
 
 
 def _bar_multi_draw(title, cats, series, th, stacked=False, percent=False):
+    """多系列柱绘制闭包:默认分组并列,stacked=True 逐层堆叠;percent=True 先在
+    类目内归一为占比(隐含 stacked),段内标注文字色按底色亮度自适应。"""
     m, ng = len(series), len(cats)
     if percent:  # 百分比堆积:类目内归一为占比(%),隐含 stacked
         stacked = True
@@ -192,6 +196,9 @@ def pareto(title: str, categories, values, *, style='business', animate=False, f
 
 
 def _waterfall_draw(title, cats, vals, th, total=True):
+    """瀑布绘制闭包:正柱从上一累计水平向上生长,负柱顶端挂累计水平向下生长;
+    total=True 末尾补"合计"柱(从 0 画到代数和),相邻柱间画桥线;
+    y 轴按含合计的全部累计水平固定,合计柱长出时轴不动。"""
     bars, acc = [], 0.0  # (label, value 或 None=合计, 起点)
     for c, v in zip(cats, vals):
         bars.append((c, v, acc))

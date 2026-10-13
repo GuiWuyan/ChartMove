@@ -32,6 +32,9 @@ from ..validate import (
 
 
 def _line_draw(title, cats, vals, th, fill=False, name='数值', band=None):
+    """单系列折线绘制闭包(单系列面积图 fill=True 复用):折线逐点延伸、末端
+    线性插值,最大/最小点过线即高亮;band 给出时画同步展开的半透明区间带;
+    fill=True 时线下填充;x 轴从首帧钉在最终范围。"""
     lo_band, hi_band = band if band is not None else (None, None)
 
     def draw(ax, p):
@@ -95,6 +98,8 @@ def line(title: str, categories, values, *, name='销售额', style='business',
 
 
 def _line_multi_draw(title, cats, series, th, value_labels=True):
+    """多系列折线绘制闭包:各系列同进度逐点延伸(同色系取色板轮换),
+    value_labels 且 ≤12 个类目时逐点标数值(用系列色,读图时归属一目了然)。"""
     def draw(ax, p):
         _style(ax, title, th)
         n = len(cats)
@@ -221,6 +226,8 @@ def area(title: str, categories, values=None, *, series=None, stacked=False, per
 
 
 def _combo_draw(title, cats, bar_vals, line_vals, th, bar_name, line_name):
+    """双轴组合绘制闭包:柱(左轴)逐根升起,折线(右轴)逐点延伸;
+    x 轴按柱宽钉死,防 twinx 共享侧把柱挤出画面。"""
     def draw(ax, p):
         _style(ax, title, th)
         n = len(cats)
@@ -269,6 +276,8 @@ def combo(title: str, categories, bar_values, line_values, *,
 
 
 def _radar_draw(title, cats, series, th):
+    """雷达绘制闭包:各系列多边形从中心同步展开,径向刻度取最大值四等分
+    (337.5° 方位避让顶部标签);首角度重复闭合多边形。"""
     n = len(cats)
     ang = [2 * math.pi * i / n for i in range(n)]
     ang_c = ang + [ang[0]]

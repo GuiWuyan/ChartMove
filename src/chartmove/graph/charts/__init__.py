@@ -1,4 +1,6 @@
-"""图表子包:22 种图按语义域分 5 个模块,模块间禁止互相 import;包级放 themes_preview。"""
+"""图表子包:24 种图按语义域分 5 个模块(categorical 柱类 / composition 占比 /
+distribution 分布关系 / flow 流程进度 / trend 趋势对比),模块间禁止互相 import;
+包级放 themes_preview(主题预览拼版图)。"""
 from __future__ import annotations
 
 import math
