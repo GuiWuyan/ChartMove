@@ -181,6 +181,28 @@ def test_make_chart_param_needs_xy_chinese_error(tmp_path):
     assert 'param 需要 x 与 y' in result.content[0].text
 
 
+def test_make_chart_expression_funcplot(tmp_path):
+    _, result = _call({
+        'type': 'funcplot', 'title': '表达式正弦', 'expr': ['sin(x)'],
+        'xmin': -6.28, 'xmax': 6.28, 'pi_ticks': True,
+        'out_dir': str(tmp_path)})
+    assert not result.is_error
+    data = json.loads(result.content[0].text)
+    assert data['type'] == 'funcplot'
+    p = Path(data['path'])
+    assert p.exists() and p.stat().st_size > 0
+    p.unlink()
+
+
+def test_make_chart_expression_unsafe_rejected(tmp_path):
+    _, result = _call({
+        'type': 'contour', 'title': 't', 'expr': ['9**9**9'],
+        'xmin': -1, 'xmax': 1, 'ymin': -1, 'ymax': 1,
+        'out_dir': str(tmp_path)})
+    assert result.is_error
+    assert '连续幂' in result.content[0].text   # 中文资源闸报错
+
+
 def test_make_chart_file_funcplot_multi_curve(tmp_path):
     f = _csv(tmp_path, 'x,sin,cos\n0,0,1\n1,0.84,0.54\n2,0.91,-0.42\n')
     _, result = _call({'type': 'funcplot', 'title': '两条曲线', 'file': f,

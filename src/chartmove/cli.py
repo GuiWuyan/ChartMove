@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from functools import partial
 from pathlib import Path
@@ -453,6 +454,13 @@ def _run_funcplot(kind, args):
     fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     extra = dict(pi_ticks=args.pi_ticks, equal=args.equal, sample=args.sample or None)
+    if args.exprs:
+        _expr_conflicts(args)
+        xmin, xmax, _, _ = _expr_ranges(args)
+        from .graph.charts.math import sample_curves
+        curves = sample_curves(args.exprs, xmin=xmin, xmax=xmax,
+                               samples=args.samples or 400)
+        return fn(args.title, curves=curves, **extra, **kw)
     if args.file:
         cols = file_numeric_columns(args.file, sheet=getattr(args, 'sheet', None))
         if len(cols) < 2:
@@ -464,8 +472,7 @@ def _run_funcplot(kind, args):
         return fn(args.title, curves=curves, **extra, **kw)
     d = _load_json(args.data) if args.data else {}
     if 'curves' in d:
-        return fn(args.title, curves=[(str(c[0]), c[1], c[2]) for c in d['curves']],
-                  **extra, **kw)
+        return fn(args.title, curves=d['curves'], **extra, **kw)
     xs = _num_list(args.x) if args.x else d.get('x')
     ys = _num_list(args.y) if args.y else d.get('y')
     if not xs or not ys:
@@ -478,6 +485,17 @@ def _run_polar(kind, args):
     fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     extra = dict(fill=args.fill, theta_pi=not args.no_theta_pi)
+    if args.exprs:
+        _expr_conflicts(args)
+        if len(args.exprs) != 1:
+            raise ValueError('polar 表达式模式需要恰好 1 个 r(θ) 表达式')
+        from .graph.charts.math import sample_curves
+        theta, r = sample_curves(
+            args.exprs[0], var='theta',
+            xmin=0.0 if args.xmin is None else args.xmin,
+            xmax=2 * math.pi if args.xmax is None else args.xmax,
+            samples=args.samples or 400)[0][1:]
+        return fn(args.title, theta, r, **extra, **kw)
     if args.file:
         cols = file_numeric_columns(args.file, 2, sheet=getattr(args, 'sheet', None))
         return fn(args.title, cols[0][1], cols[1][1], **extra, **kw)
@@ -496,6 +514,16 @@ def _run_param(kind, args):
     fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     extra = dict(arrows=args.arrows, equal=not args.no_equal, pi_ticks=args.pi_ticks)
+    if args.exprs:
+        _expr_conflicts(args)
+        if len(args.exprs) != 2:
+            raise ValueError('param 表达式模式需要恰好 2 个表达式:x(t) 与 y(t)'
+                             '(--xmin/--xmax 即 t 范围)')
+        xmin, xmax, _, _ = _expr_ranges(args)
+        from .graph.charts.math import sample_param
+        xs, ys = sample_param(args.exprs[0], args.exprs[1], tmin=xmin, tmax=xmax,
+                              samples=args.samples or 400)
+        return fn(args.title, xs, ys, **extra, **kw)
     if args.file:
         cols = file_numeric_columns(args.file, sheet=getattr(args, 'sheet', None))
         if len(cols) == 2:
@@ -521,6 +549,16 @@ def _run_vector(kind, args):
     fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     extra = dict(mode=args.mode, density=args.density)
+    if args.exprs:
+        _expr_conflicts(args, ('--u', '--v'))
+        if len(args.exprs) != 2:
+            raise ValueError('vector 表达式模式需要恰好 2 个表达式:u(x, y) 与 v(x, y)')
+        xmin, xmax, ymin, ymax = _expr_ranges(args, y=True)
+        from .graph.charts.math import sample_vector_field
+        xs, ys, us, vs = sample_vector_field(args.exprs[0], args.exprs[1],
+                                             xmin=xmin, xmax=xmax, ymin=ymin,
+                                             ymax=ymax, n=args.samples or 20)
+        return fn(args.title, xs, ys, us, vs, **extra, **kw)
     if args.file:
         cols = file_numeric_columns(args.file, 4, sheet=getattr(args, 'sheet', None))
         return fn(args.title, cols[0][1], cols[1][1], cols[2][1], cols[3][1],
@@ -548,6 +586,23 @@ def _levels_arg(text):
         raise ValueError(f"--levels 需为整数或逗号分隔数值,收到 {text!r}") from None
 
 
+def _expr_conflicts(args, extra_flags=()):
+    """表达式模式与其他数据入口互斥(batch 命名空间 exprs 恒为空,不触发)。"""
+    flags = ('--file', '--x', '--y', '--data', *extra_flags)
+    on = [f for f in flags if getattr(args, f.lstrip('-').replace('-', '_'), None)]
+    if on:
+        raise ValueError(f'表达式数据与 {", ".join(on)} 不能同时给,请二选一')
+
+
+def _expr_ranges(args, *, y=False):
+    """表达式模式变量范围:--xmin/--xmax 必给;y=True 时 --ymin/--ymax 也必给。"""
+    if args.xmin is None or args.xmax is None:
+        raise ValueError('表达式模式需要 --xmin 与 --xmax 给出变量范围')
+    if y and (args.ymin is None or args.ymax is None):
+        raise ValueError('表达式模式需要 --ymin 与 --ymax 给出第二变量范围')
+    return args.xmin, args.xmax, args.ymin, args.ymax
+
+
 def _run_field(kind, args):
     """contour / surface 共用:--file 矩阵布局(行名/列名 = 数值坐标)或 --long 切
     3 列长表(x,y,z);内联 --x/--y/--z 或 --data(rows/cols/values,rows=y、cols=x)。"""
@@ -558,6 +613,15 @@ def _run_field(kind, args):
                      levels=_levels_arg(args.levels), pi_ticks=args.pi_ticks)
     else:
         extra = dict(colorbar=not args.no_colorbar, elev=args.elev, azim=args.azim)
+    if args.exprs:
+        _expr_conflicts(args, ('--z',))
+        if len(args.exprs) != 1:
+            raise ValueError(f'{kind} 表达式模式需要恰好 1 个表达式 f(x, y)')
+        xmin, xmax, ymin, ymax = _expr_ranges(args, y=True)
+        from .graph.charts.math import sample_field
+        xs, ys, zs = sample_field(args.exprs[0], xmin=xmin, xmax=xmax, ymin=ymin,
+                                  ymax=ymax, n=args.samples or 60)
+        return fn(args.title, xs, ys, zs, **extra, **kw)
     if args.file:
         if args.long:
             cols = file_numeric_columns(args.file, 3, sheet=getattr(args, 'sheet', None))
@@ -678,6 +742,9 @@ def _prep_batch_args(args, kind: str, file: Path, title: str) -> None:
     args.long = args.levels = args.no_fill = args.no_colorbar = False
     args.elev, args.azim = 28.0, -60.0
     args.u = args.v = args.z = None
+    args.exprs = []
+    args.xmin = args.xmax = args.ymin = args.ymax = None
+    args.samples = None
     if kind in _MATH_TYPES and args.numfmt == 'auto':
         args.numfmt = 'plain'   # math 域默认 plain(万/亿刻度对数学轴无意义)
 
@@ -834,6 +901,19 @@ def _build_parser() -> argparse.ArgumentParser:
     # math 域(科学绘图):数据为数值序列/矩阵,无 类目=值 位置数据;默认 numfmt=plain
     for name in _MATH_TYPES:
         sps[name].set_defaults(numfmt='plain')
+        sps[name].add_argument('exprs', nargs='*',
+                               help='表达式,如 "sin(x)"(funcplot 多个 = 多曲线;'
+                                    'param / vector 需恰 2 个;与 --file/--x/--y/--data 互斥;'
+                                    '以 - 开头的表达式请先用 "--" 分隔选项与表达式)')
+        sps[name].add_argument('--xmin', type=float, help='表达式模式:变量范围下界')
+        sps[name].add_argument('--xmax', type=float, help='表达式模式:变量范围上界')
+        sps[name].add_argument('--ymin', type=float,
+                               help='表达式模式(二维场):第二变量范围下界')
+        sps[name].add_argument('--ymax', type=float,
+                               help='表达式模式(二维场):第二变量范围上界')
+        sps[name].add_argument('--samples', type=int,
+                               help='表达式模式:采样点数(曲线默认 400)或二维场每轴点数'
+                                    '(vector 默认 20,contour/surface 默认 60)')
     sps['funcplot'].add_argument('--x', help='x 数值,逗号分隔(或 --data 的 x 字段)')
     sps['funcplot'].add_argument('--y', help='y 数值,逗号分隔')
     sps['funcplot'].add_argument('--sample', type=int, help='LTTB 保形降采样目标点数')

@@ -35,6 +35,9 @@
 | `--data` JSON        | 单系列(仅单图命令)                                                                                                                    | `--data '{"categories":["Q1"],"values":[120]}'` 或 `--data data.json` |
 | `--series` JSON      | 多系列:`line-multi` / `bar-multi` / `radar` / `area` / `dumbbell`(配 `--categories`);`box` / `violin` 只要 `--series`(每系列一组样本) | `--series '[["销售额",[1,2]],...]'`(也接受 `{名称: [值...]}`)         |
 | `--file` CSV / Excel | 全部类型除 `sunburst`                                                                                                                 | `--file sales.csv --cat-col 基金名称 --col "盈亏率(%)"`               |
+| 表达式(math 域)     | `funcplot` / `polar` / `param` / `vector` / `contour` / `surface`                                                                     | `chartmove funcplot "正弦" "sin(x)" --xmin -6.28 --xmax 6.28`         |
+
+**表达式语法**(math 域专用,与 `--file` / `--x/--y` 等数据参数互斥):变量 `x`、`y`(二维场)/ `t`(param)/ `theta`(polar,弧度);常量 `pi`、`e`、`tau`;函数为 numpy 数学函数白名单(`sin cos tan exp log sqrt abs where clip minimum maximum heaviside ...`,完整清单见报错提示)。范围用 `--xmin/--xmax`(二维场加 `--ymin/--ymax`);`--samples` 是采样点数(曲线默认 400)或二维场每轴点数(vector 默认 20 / contour、surface 默认 60)。安全闸:仅算术运算 + 白名单函数,禁属性访问/导入/连续幂/指数>100,违规报中文错。以 `-` 开头的表达式(如旋转场 `-y`)先把选项写完再用 `--` 分隔:`chartmove vector "旋转场" --xmin -2 --xmax 2 --ymin -2 --ymax 2 -- -y x`。
 
 **通用参数**(单图与 batch 都有;标"仅单图"的除外):
 
@@ -88,8 +91,9 @@ chartmove line "营收预测" 1月=120 2月=135 --lower 112,125 --upper 128,145 
 chartmove line "盈亏率" --file 基金.csv --cat-col 基金名称 --col "盈亏率(%)" --style cyberpunk   # 表格选列
 chartmove sunburst "销售构成" --data '{"水果": {"苹果": 30}}'                   # 层级 JSON
 chartmove funcplot "阻尼振荡" --file data.csv --pi-ticks                        # 科学绘图:文件 x,y(多列 = 多曲线)
+chartmove funcplot "正弦" "sin(x)" --xmin -6.28 --xmax 6.28 --pi-ticks          # 表达式入口(多表达式 = 多曲线)
 chartmove vector "流场" --file field.csv --mode stream                          # 矢量场出流线(x,y,u,v 四列)
-chartmove surface "鞍面" --file grid.csv --animate                              # 3D 曲面相机环绕 MP4/GIF
+chartmove surface "波面" "sin(x)*cos(y)" --xmin -3 --xmax 3 --ymin -3 --ymax 3 --animate   # 表达式 3D 曲面 + 相机环绕
 chartmove themes --preview                                     # 主题预览拼版图
 ```
 

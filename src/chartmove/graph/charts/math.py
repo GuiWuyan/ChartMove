@@ -1,14 +1,16 @@
 """math 域科学绘图:连续数值轴基础设施 + 六种图(funcplot 函数图像 / polar 极坐标
 曲线 / param 参数曲线·相轨线 / vector 矢量场·流线·方向场 / contour 等高线 /
-surface 三维曲面)。
+surface 三维曲面)+ 表达式引擎(asteval 封装)。
 与商务图域隔离:类目轴助手(_xticks/_ylim)不适用,本模块自备最小轴助手;
-数据入口为数值序列/矩阵,文件列与表达式解析在入口层(cli / mcp_server)。"""
+数据入口为数值序列/矩阵,文件列解析在入口层(cli / mcp_server)。"""
 from __future__ import annotations
 
+import ast
 import math
 from pathlib import Path
 
 import numpy as np
+from asteval import Interpreter
 from matplotlib.colors import LinearSegmentedColormap, to_rgba
 from matplotlib.ticker import FuncFormatter, MultipleLocator
 
@@ -240,6 +242,7 @@ def funcplot(title, x=None, y=None, *, curves=None, name=None, style='business',
             nm, xs, ys = item
         except (TypeError, ValueError) as e:
             raise ValueError('curves 每项需为 (名称, x, y) 三元组') from e
+        nm = str(nm)
         what = f'曲线「{nm}」' if nm else f'第 {i + 1} 条曲线'
         xs, ys = _validate_xy(xs, ys, allow_nan=True, sort_x=True, what=what)
         norm.append((nm, xs, ys))
@@ -464,3 +467,154 @@ def surface(title, x, y, z=None, *, colorbar=True, elev=28.0, azim=-60.0,
                                                    elev, azim),
                    animate=animate, fmt=fmt, out=out, out_dir=out_dir, loop=loop,
                    projection='3d', figsize=figsize, dpi=dpi, th=th)
+
+
+# ==================== 表达式引擎(M3:asteval 求值 + AST 资源闸) ====================
+# 安全模型:asteval 挡注入(禁 import/属性/下标等),本节 AST 白名单挡资源失控
+# (连续幂 / 大指数 / 非数学成分),双层各管一半;asteval 作者声明其防误用不防
+# 蓄意攻击者,对本工具"用户想画图"的威胁模型足够。
+
+_EXPR_FUNCS: dict[str, object] = {
+    'sin': np.sin, 'cos': np.cos, 'tan': np.tan,
+    'asin': np.arcsin, 'acos': np.arccos, 'atan': np.arctan, 'atan2': np.arctan2,
+    'sinh': np.sinh, 'cosh': np.cosh, 'tanh': np.tanh,
+    'asinh': np.arcsinh, 'acosh': np.arccosh, 'atanh': np.arctanh,
+    'exp': np.exp, 'expm1': np.expm1, 'log': np.log, 'log10': np.log10,
+    'log2': np.log2, 'log1p': np.log1p, 'sqrt': np.sqrt, 'cbrt': np.cbrt,
+    'abs': np.abs, 'sign': np.sign, 'floor': np.floor, 'ceil': np.ceil,
+    'round': np.round, 'clip': np.clip, 'where': np.where,
+    'minimum': np.minimum, 'maximum': np.maximum, 'hypot': np.hypot,
+    'heaviside': np.heaviside, 'sinc': np.sinc,
+    'deg2rad': np.deg2rad, 'rad2deg': np.rad2deg, 'mod': np.mod,
+}
+_EXPR_CONSTS: dict[str, float] = {'pi': math.pi, 'e': math.e, 'tau': math.tau,
+                                  'inf': np.inf, 'nan': np.nan}
+_OK_NODES = (ast.Expression, ast.Load, ast.BinOp, ast.UnaryOp, ast.USub, ast.UAdd,
+             ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow, ast.Mod, ast.Call,
+             ast.Name, ast.Constant)
+
+
+def _ast_gate(expr: str, variables: set[str]) -> None:
+    """表达式 AST 白名单扫描:语法错误 / 非数学成分 / 连续幂 / 大指数报中文错。"""
+    try:
+        tree = ast.parse(expr, mode='eval')
+    except SyntaxError as e:
+        raise ValueError(f'表达式语法错误:{expr!r}(第 {e.offset} 列附近)') from e
+    called: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, _OK_NODES):
+            raise ValueError(f'表达式含不允许的成分({type(node).__name__});'
+                             '只支持算术运算、白名单数学函数与数值常量')
+        if isinstance(node, ast.Call):
+            if not (isinstance(node.func, ast.Name) and node.func.id in _EXPR_FUNCS):
+                bad = getattr(node.func, 'id', type(node.func).__name__)
+                raise ValueError(f'表达式只允许调用白名单数学函数,收到:{bad!r}')
+            if node.keywords:
+                raise ValueError('表达式函数调用不接受关键字参数')
+            called.add(node.func.id)
+        elif isinstance(node, ast.BinOp):
+            if not isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div,
+                                        ast.Pow, ast.Mod)):
+                raise ValueError('表达式只支持 + - * / % 与 ** 运算')
+            if (isinstance(node.op, ast.Pow) and isinstance(node.right, ast.BinOp)
+                    and isinstance(node.right.op, ast.Pow)):
+                raise ValueError('不支持连续幂 a**b**c(易失控),请拆开写')
+            if (isinstance(node.op, ast.Pow) and isinstance(node.right, ast.Constant)
+                    and abs(float(node.right.value)) > 100):
+                raise ValueError('幂指数过大(上限 100)')
+        elif isinstance(node, ast.UnaryOp) and not isinstance(node.op, (ast.USub, ast.UAdd)):
+            raise ValueError('表达式一元运算只支持正负号')
+        elif isinstance(node, ast.Constant) and not isinstance(node.value, (int, float)):
+            raise ValueError(f'表达式只允许数值常量,收到:{node.value!r}')
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Name) or node.id in called:
+            continue
+        if node.id in variables or node.id in _EXPR_CONSTS:
+            continue
+        if node.id in _EXPR_FUNCS:
+            raise ValueError(f'函数 {node.id!r} 需带括号调用,如 {node.id}(x)')
+        raise ValueError(f'表达式含未知符号 {node.id!r};'
+                         f'可用变量:{", ".join(sorted(variables))},'
+                         f'常量:{" / ".join(_EXPR_CONSTS)},'
+                         f'函数:{" / ".join(sorted(_EXPR_FUNCS))}')
+
+
+def _interpreter(var_map: dict) -> Interpreter:
+    """asteval 求值器:仅注入本次用到的变量 + 白名单函数与常量。"""
+    aeval = Interpreter()
+    aeval.symtable.update(var_map)
+    aeval.symtable.update(_EXPR_FUNCS)
+    aeval.symtable.update(_EXPR_CONSTS)
+    return aeval
+
+
+def _eval_expr(expr: str, var_map: dict[str, np.ndarray]) -> np.ndarray:
+    """单表达式在变量上求值;标量结果广播到变量形状;异常统一转中文。"""
+    expr = str(expr)
+    _ast_gate(expr, set(var_map))
+    aeval = _interpreter(var_map)
+    try:
+        with np.errstate(all='ignore'):
+            out = aeval.eval(expr)
+    except (OverflowError, ZeroDivisionError, ValueError, TypeError, NameError) as e:
+        raise ValueError(f'表达式求值失败:{expr!r} —— {e}') from e
+    if aeval.error:
+        err = aeval.error[0]
+        detail = err.getmsg() if hasattr(err, 'getmsg') else str(err)
+        raise ValueError(f'表达式求值失败:{expr!r} —— {detail}')
+    out = np.asarray(out, dtype=float)
+    if out.ndim == 0:   # 常量表达式(如 "2")广播成常值曲线/平面
+        ref = next(iter(var_map.values()))
+        out = np.full(ref.shape, float(out))
+    return out
+
+
+def _check_samples(samples) -> int:
+    """采样点数闸:2 ≤ samples ≤ MAX_POINTS。"""
+    if not isinstance(samples, (int, np.integer)) or not 2 <= int(samples) <= MAX_POINTS:
+        raise ValueError(f'采样点数 samples 需为 2 ~ {MAX_POINTS} 的整数,收到 {samples!r}')
+    return int(samples)
+
+
+def _check_grid(n) -> int:
+    """二维场每轴点数闸:n ≥ 2 且 n² ≤ MAX_POINTS。"""
+    if not isinstance(n, (int, np.integer)) or not 2 <= int(n) \
+            or int(n) * int(n) > MAX_POINTS:
+        raise ValueError(f'二维场每轴点数 n 需满足 2 ≤ n 且 n² ≤ {MAX_POINTS}'
+                         f'(即 n ≤ {math.isqrt(MAX_POINTS)}),收到 {n!r}')
+    return int(n)
+
+
+def sample_curves(exprs, *, xmin, xmax, samples=400, var='x') -> list:
+    """表达式或表达式列表 → [(表达式文本, xs, ys)]:在 [xmin, xmax] 均匀采样,
+    每个表达式一条曲线,图例即表达式本身。"""
+    if isinstance(exprs, (str, bytes)):   # 单表达式直传,防按字符迭代
+        exprs = [exprs]
+    lo, hi = _check_range(xmin, xmax)
+    xs = np.linspace(lo, hi, _check_samples(samples))
+    return [(str(e), xs, _eval_expr(e, {var: xs})) for e in exprs]
+
+
+def sample_param(ex, ey, *, tmin, tmax, samples=400) -> tuple:
+    """参数曲线表达式对 → (xs, ys):x(t)、y(t) 在 [tmin, tmax] 均匀采样。"""
+    _check_range(tmin, tmax, what='t 范围')
+    ts = np.linspace(tmin, tmax, _check_samples(samples))
+    return _eval_expr(ex, {'t': ts}), _eval_expr(ey, {'t': ts})
+
+
+def sample_field(expr, *, xmin, xmax, ymin, ymax, n=50) -> tuple:
+    """二元表达式 f(x,y) → (x 轴向量, y 轴向量, 网格[n 行 y × n 列 x])。"""
+    lo, hi = _check_range(xmin, xmax, what='x 范围')
+    vlo, vhi = _check_range(ymin, ymax, what='y 范围')
+    n = _check_grid(n)
+    xs, ys = np.linspace(lo, hi, n), np.linspace(vlo, vhi, n)
+    X, Y = np.meshgrid(xs, ys)
+    return xs, ys, _eval_expr(expr, {'x': X, 'y': Y})
+
+
+def sample_vector_field(eu, ev, *, xmin, xmax, ymin, ymax, n=20) -> tuple:
+    """二元表达式对 (u, v) → 长表 (x, y, u, v),与 vector() 数据入口一致。"""
+    xs, ys, U = sample_field(eu, xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax, n=n)
+    _, _, V = sample_field(ev, xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax, n=n)
+    X, Y = np.meshgrid(xs, ys)
+    return X.ravel(), Y.ravel(), U.ravel(), V.ravel()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import math
 import sys
 from pathlib import Path
 from typing import Any, Literal, get_args
@@ -151,6 +152,15 @@ def _bins(bins):
         '+ colorbar; '
         'surface: same data as contour in 3-D; animate=true orbits the camera '
         '360 degrees (elev / azim set the view angle). '
+        'Math types also accept expr = list of expression strings instead of '
+        'numeric arrays: variables x and y (2-D fields), t (param), theta '
+        '(polar); constants pi / e / tau; numpy math functions (sin, cos, exp, '
+        'log, sqrt, abs, where, clip, ...). Sampled over xmin/xmax (+ ymin/ymax '
+        'for 2-D fields; polar defaults to 0..2*pi); samples = point count '
+        '(curves, default 400) or grid points per axis (vector 20 / contour '
+        'surface 60). expr is mutually exclusive with the numeric data params; '
+        'unsafe constructs (attribute access, imports, chained powers, literal '
+        'exponents > 100) and unknown symbols are rejected with Chinese errors. '
         'file (optional): path to a CSV/Excel file (.csv/.xlsx, first row = header) '
         'to read data from - takes precedence over inline data params. '
         'cat_col / col select the category column / one value column '
@@ -234,6 +244,12 @@ def make_chart(
     elev: float = 28.0,
     azim: float = -60.0,
     long: bool = False,
+    expr: list[str] | None = None,
+    xmin: float | None = None,
+    xmax: float | None = None,
+    ymin: float | None = None,
+    ymax: float | None = None,
+    samples: int | None = None,
     numfmt: Literal['auto', 'plain', 'percent'] = 'auto',
     note: str | None = None,
     file: str | None = None,
@@ -362,7 +378,9 @@ def make_chart(
                                            curves=curves, rows=rows, cols=cols,
                                            matrix=matrix, mode=mode, density=density,
                                            pi_ticks=pi_ticks, fill=fill, arrows=arrows,
-                                           elev=elev, azim=azim, common=common),
+                                           elev=elev, azim=azim, expr=expr,
+                                           xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax,
+                                           samples=samples, common=common),
                                type, style, animate)
             raise ToolError(f'未知图表类型 {type!r},'
                             f'可选:{", ".join(get_args(ChartType))}')
@@ -371,41 +389,86 @@ def make_chart(
 
 
 def _math_chart(type, title, *, x, y, u, v, z, curves, rows, cols, matrix, mode,
-                density, pi_ticks, fill, arrows, elev, azim, common):
-    """math 域内联数据分发(数值序列/矩阵,列约定见 make_chart description);
+                density, pi_ticks, fill, arrows, elev, azim, expr, xmin, xmax,
+                ymin, ymax, samples, common):
+    """math 域内联数据分发(数值序列/矩阵/表达式,列约定见 make_chart description);
     返回 Path,由调用方包 _result。"""
+    from .graph.charts.math import sample_curves, sample_field, sample_param, sample_vector_field
     fn = _chart_fn(type)
     if type == 'funcplot':
+        if expr:
+            _require(not (x or y or curves), 'funcplot 的 expr 与 x/y/curves 不能同时给')
+            curves = sample_curves(expr, xmin=xmin, xmax=xmax, samples=samples or 400)
+            return fn(title, curves=curves, pi_ticks=pi_ticks, **common)
         if curves is not None:
-            cs = [(str(c[0]), c[1], c[2]) for c in curves]
-            return fn(title, curves=cs, pi_ticks=pi_ticks, **common)
+            return fn(title, curves=curves, pi_ticks=pi_ticks, **common)
         _require(x is not None and y is not None,
-                 'funcplot 需要 x 与 y(或 curves=[[名称, x, y], ...])')
+                 'funcplot 需要 x 与 y(或 curves=[[名称, x, y], ...],'
+                 '或 expr 表达式 + xmin/xmax)')
         return fn(title, x, y, pi_ticks=pi_ticks, **common)
     if type == 'polar':
+        if expr:
+            _require(not x and not y, 'polar 的 expr 与 x/y 不能同时给')
+            _require(len(expr) == 1, 'polar 表达式模式需要恰好 1 个 r(θ) 表达式')
+            theta, r = sample_curves(
+                expr[0], var='theta',
+                xmin=0.0 if xmin is None else xmin,
+                xmax=2 * math.pi if xmax is None else xmax,
+                samples=samples or 400)[0][1:]
+            return fn(title, theta, r, fill=fill, **common)
         _require(x is not None and y is not None,
-                 'polar 需要 x(theta,弧度)与 y(r)')
+                 'polar 需要 x(theta,弧度)与 y(r),或 expr 表达式')
         return fn(title, x, y, fill=fill, **common)
     if type == 'param':
-        _require(x is not None and y is not None, 'param 需要 x 与 y')
+        if expr:
+            _require(not x and not y, 'param 的 expr 与 x/y 不能同时给')
+            _require(len(expr) == 2, 'param 表达式模式需要恰好 2 个表达式:x(t) 与 y(t)')
+            xs, ys = sample_param(expr[0], expr[1], tmin=xmin, tmax=xmax,
+                                  samples=samples or 400)
+            return fn(title, xs, ys, arrows=arrows, pi_ticks=pi_ticks, **common)
+        _require(x is not None and y is not None, 'param 需要 x 与 y,或 expr 表达式')
         return fn(title, x, y, arrows=arrows, pi_ticks=pi_ticks, **common)
     if type == 'vector':
+        if expr:
+            _require(not (x or y or u or v), 'vector 的 expr 与 x/y/u/v 不能同时给')
+            _require(len(expr) == 2,
+                     'vector 表达式模式需要恰好 2 个表达式:u(x, y) 与 v(x, y)')
+            _require(all(v is not None for v in (xmin, xmax, ymin, ymax)),
+                     'vector 表达式模式需要 xmin/xmax/ymin/ymax 四个范围')
+            gx, gy, gu, gv = sample_vector_field(expr[0], expr[1], xmin=xmin,
+                                                 xmax=xmax, ymin=ymin, ymax=ymax,
+                                                 n=samples or 20)
+            return fn(title, gx, gy, gu, gv, mode=mode, density=density, **common)
         _require(x is not None and y is not None and u is not None and v is not None,
-                 'vector 需要 x、y、u、v 四个等长数值序列')
+                 'vector 需要 x、y、u、v 四个等长数值序列,或 expr 表达式')
         return fn(title, x, y, u, v, mode=mode, density=density, **common)
     if type == 'contour':
+        if expr:
+            _require(not (x or y or z or rows), 'contour 的 expr 与数据参数不能同时给')
+            _require(all(v is not None for v in (xmin, xmax, ymin, ymax)),
+                     'contour 表达式模式需要 xmin/xmax/ymin/ymax 四个范围')
+            axs, ays, zs = sample_field(expr[0], xmin=xmin, xmax=xmax, ymin=ymin,
+                                        ymax=ymax, n=samples or 60)
+            return fn(title, axs, ays, zs, pi_ticks=pi_ticks, **common)
         if rows is not None and cols is not None and matrix is not None:
             return fn(title, cols, rows, matrix, pi_ticks=pi_ticks, **common)
         _require(x is not None and y is not None and z is not None,
                  'contour 需要 x、y、z(长表)或 rows/cols/matrix(矩阵,'
-                 'rows=y 坐标、cols=x 坐标)')
+                 'rows=y 坐标、cols=x 坐标),或 expr 表达式')
         return fn(title, x, y, z, pi_ticks=pi_ticks, **common)
     # surface
+    if expr:
+        _require(not (x or y or z or rows), 'surface 的 expr 与数据参数不能同时给')
+        _require(all(v is not None for v in (xmin, xmax, ymin, ymax)),
+                 'surface 表达式模式需要 xmin/xmax/ymin/ymax 四个范围')
+        axs, ays, zs = sample_field(expr[0], xmin=xmin, xmax=xmax, ymin=ymin,
+                                    ymax=ymax, n=samples or 60)
+        return fn(title, axs, ays, zs, elev=elev, azim=azim, **common)
     if rows is not None and cols is not None and matrix is not None:
         return fn(title, cols, rows, matrix, elev=elev, azim=azim, **common)
     _require(x is not None and y is not None and z is not None,
              'surface 需要 x、y、z(长表)或 rows/cols/matrix(矩阵,'
-             'rows=y 坐标、cols=x 坐标)')
+             'rows=y 坐标、cols=x 坐标),或 expr 表达式')
     return fn(title, x, y, z, elev=elev, azim=azim, **common)
 
 
@@ -534,10 +597,11 @@ def _from_file(type, title, file, cat_col, col, sheet, common, *, horizontal, tr
                                             cols[2][1], cols[3][1], mode=mode,
                                             density=density, **common), type)
         # contour / surface:矩阵布局(行列名 = 数值坐标)或 long=true 切 3 列长表
+        extra = dict(pi_ticks=pi_ticks) if type == 'contour' else dict(elev=elev, azim=azim)
         if long:
             cols = file_numeric_columns(file, 3, sheet=sheet)
             return done(_chart_fn(type)(title, cols[0][1], cols[1][1], cols[2][1],
-                                        **common), type)
+                                        **extra, **common), type)
         rlabels, col_names, mat = file_matrix(file, cat_col, sheet)
         try:
             ys = [parse_float(v, '(行坐标)') for v in rlabels]
@@ -545,7 +609,7 @@ def _from_file(type, title, file, cat_col, col, sheet, common, *, horizontal, tr
         except ValueError as e:
             raise ToolError(f'矩阵布局的行名/列名需为数值坐标,'
                             f'x,y,z 长表请传 long=true;{e}') from e
-        return done(_chart_fn(type)(title, xs, ys, mat, **common), type)
+        return done(_chart_fn(type)(title, xs, ys, mat, **extra, **common), type)
     if type == 'sunburst':
         raise ToolError('sunburst 暂不支持 file 数据(层级数据请用 hierarchy 内联参数)')
     raise ToolError(f'未知图表类型 {type!r},可选:{", ".join(get_args(ChartType))}')

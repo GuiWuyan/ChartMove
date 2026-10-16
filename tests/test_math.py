@@ -18,6 +18,10 @@ from chartmove.graph.charts.math import (
     _pi_axis,
     _pi_label,
     _validate_xy,
+    sample_curves,
+    sample_field,
+    sample_param,
+    sample_vector_field,
 )
 from chartmove.graph.render import _render
 from chartmove.themes import THEMES
@@ -343,3 +347,123 @@ def test_cli_funcplot_batch_multi_files(tmp_path):
                      '--title', '{name}曲线', '--out-dir', str(out)]) == 0
     names = {p.name for p in out.glob('*.png')}
     assert any('a' in n for n in names) and any('b' in n for n in names)
+
+
+# ==================== M3:表达式引擎(asteval + AST 资源闸) ====================
+
+def test_sample_curves_values_and_labels():
+    curves = sample_curves(['sin(x)', '2'], xmin=0.0, xmax=math.pi, samples=5)
+    xs = np.linspace(0.0, math.pi, 5)
+    assert curves[0][0] == 'sin(x)'                      # 图例 = 表达式本身
+    assert np.allclose(curves[0][2], np.sin(xs))
+    assert np.allclose(curves[1][2], 2.0)                # 常量表达式广播成常值曲线
+
+
+def test_sample_param_and_field():
+    ts, ys = sample_param('t', 't ** 2', tmin=0.0, tmax=2.0, samples=3)
+    assert np.allclose(ts, [0, 1, 2]) or np.allclose(ys, [0, 1, 4])
+    xs, grid_y, zs = sample_field('sin(x) * cos(y)', xmin=-1.0, xmax=1.0,
+                                  ymin=-1.0, ymax=1.0, n=6)
+    assert zs.shape == (6, 6) and len(xs) == len(grid_y) == 6
+    gx, gy, us, vs = sample_vector_field('-y', 'x', xmin=-2.0, xmax=2.0,
+                                         ymin=-2.0, ymax=2.0, n=4)
+    assert len(gx) == len(gy) == len(us) == len(vs) == 16   # 长表形式
+    assert np.allclose(us, -gy) and np.allclose(vs, gx)
+
+
+def test_sample_range_and_samples_gates():
+    with pytest.raises(ValueError, match='下界'):
+        sample_curves(['x'], xmin=1, xmax=-1)
+    with pytest.raises(ValueError, match='采样点数'):
+        sample_curves(['x'], xmin=0, xmax=1, samples=MAX_POINTS + 1)
+
+
+@pytest.mark.parametrize('bad', [
+    "__import__('os')",          # 非白名单函数
+    '().__class__',              # 属性访问
+    'lambda: 1',                 # lambda
+    '9**9**9',                   # 连续幂(资源闸)
+    '2**999',                    # 大指数(资源闸)
+    'x = 1',                     # 语句不是表达式
+    'sin(1);cos(1)',             # 多语句
+    'y + 1',                     # 未知符号(变量只有 x)
+    'sin + 1',                   # 函数未带括号调用
+    "[1, 2, 3]",                 # 列表字面量
+])
+def test_expression_gate_rejects_unsafe(bad):
+    with pytest.raises(ValueError):
+        sample_curves([bad], xmin=0, xmax=1)
+
+
+def test_expression_gate_known_symbols_accepted():
+    curves = sample_curves(['sin(pi * x) + e ** (-x)'], xmin=0.0, xmax=1.0,
+                           samples=4)
+    assert np.all(np.isfinite(curves[0][2]))
+
+
+def test_expression_chinese_error_messages():
+    with pytest.raises(ValueError, match='语法错误'):
+        sample_curves(['sin('], xmin=0, xmax=1)
+    with pytest.raises(ValueError, match='白名单'):
+        sample_curves(['foo(x)'], xmin=0, xmax=1)
+    with pytest.raises(ValueError, match='未知符号'):
+        sample_curves(['foo + 1'], xmin=0, xmax=1)
+
+
+# ==================== M3:CLI / MCP 表达式入口 ====================
+
+def test_cli_funcplot_expression(tmp_path):
+    assert cli.main(['funcplot', '正弦', 'sin(x)', 'cos(x)',
+                     '--xmin', '-6.28', '--xmax', '6.28', '--pi-ticks',
+                     '--out-dir', str(tmp_path), '--out', 'm3_f']) == 0
+    assert (tmp_path / 'm3_f.png').exists()
+
+
+def test_cli_polar_expression_default_range(tmp_path):
+    assert cli.main(['polar', '三叶玫瑰', 'cos(3 * theta)',
+                     '--out-dir', str(tmp_path), '--out', 'm3_p']) == 0
+    assert (tmp_path / 'm3_p.png').exists()
+
+
+def test_cli_param_expression(tmp_path):
+    assert cli.main(['param', '利萨如', 'sin(3 * t)', 'sin(4 * t)',
+                     '--xmin', '0', '--xmax', '6.28', '--samples', '600',
+                     '--arrows', '--out-dir', str(tmp_path), '--out', 'm3_pa']) == 0
+    assert (tmp_path / 'm3_pa.png').exists()
+
+
+def test_cli_vector_expression_stream(tmp_path):
+    # 表达式以 - 开头时,选项须写在前面并用 "--" 分隔(argparse 规则)
+    assert cli.main(['vector', '旋转场', '--mode', 'stream',
+                     '--xmin', '-2', '--xmax', '2', '--ymin', '-2', '--ymax', '2',
+                     '--out-dir', str(tmp_path), '--out', 'm3_v',
+                     '--', '-y', 'x']) == 0
+    assert (tmp_path / 'm3_v.png').exists()
+
+
+def test_cli_contour_expression(tmp_path):
+    assert cli.main(['contour', '波场', 'sin(x) * cos(y)',
+                     '--xmin', '-3', '--xmax', '3', '--ymin', '-3', '--ymax', '3',
+                     '--out-dir', str(tmp_path), '--out', 'm3_c']) == 0
+    assert (tmp_path / 'm3_c.png').exists()
+
+
+def test_cli_surface_expression(tmp_path):
+    assert cli.main(['surface', '波面', 'sin(x) * cos(y)',
+                     '--xmin', '-3', '--xmax', '3', '--ymin', '-3', '--ymax', '3',
+                     '--out-dir', str(tmp_path), '--out', 'm3_s']) == 0
+    assert (tmp_path / 'm3_s.png').exists()
+
+
+def test_cli_expression_conflicts_rejected(tmp_path):
+    # 表达式与 --x/--y 内联互斥
+    assert cli.main(['funcplot', 't', 'sin(x)', '--x', '0,1', '--y', '0,1',
+                     '--xmin', '0', '--xmax', '1',
+                     '--out-dir', str(tmp_path)]) == 1
+    # 缺范围
+    assert cli.main(['funcplot', 't', 'sin(x)',
+                     '--out-dir', str(tmp_path)]) == 1
+    # vector 表达式需要恰好 2 个
+    assert cli.main(['vector', 't', 'x', '--xmin', '0', '--xmax', '1',
+                     '--ymin', '0', '--ymax', '1',
+                     '--out-dir', str(tmp_path)]) == 1
