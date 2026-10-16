@@ -116,7 +116,10 @@ def _origin_spines(ax) -> None:
 
 def _limits(vals, pad: float = 0.08) -> tuple[float, float]:
     """数值轴范围:数据范围(忽略 nan)加对称边距;动画首帧即定稿,轴不跳动。"""
-    lo, hi = float(np.nanmin(vals)), float(np.nanmax(vals))
+    finite = np.asarray(vals)[np.isfinite(vals)]
+    if finite.size == 0:
+        raise ValueError('数据不含有限数值(全为 nan 断点),无法确定坐标轴范围')
+    lo, hi = float(finite.min()), float(finite.max())
     if lo == hi:
         lo, hi = lo - 1.0, hi + 1.0
     span = hi - lo
@@ -251,7 +254,7 @@ def funcplot(title, x=None, y=None, *, curves=None, name=None, style='business',
 
 def _polar_draw(title, name, theta, r, th, fill, theta_pi):
     """极坐标绘制闭包:r 范围首帧固定;theta 刻度按 π/2 渲染分数标签。"""
-    rmin, rmax = float(np.nanmin(r)), float(np.nanmax(r))
+    rmin, rmax = _limits(r)   # 全 nan 在此报中文错
     span = (rmax - rmin) or max(abs(rmax), 1.0)
     color = th['palette'][0]
 

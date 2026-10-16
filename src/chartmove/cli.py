@@ -1,8 +1,9 @@
-"""CLI 入口:24 种图表类型,一条命令出图(数据写法与参数表见 README.md)。
+"""CLI 入口:30 种图表类型,一条命令出图(数据写法与参数表见 README.md)。
 
     chartmove bar "季度产量" Q1=120 Q2=200 Q3=90 --style mckinsey
     chartmove line-multi "对比" --categories 1月,2月,3月 --series series.json
     chartmove sunburst "销售构成" --data '{"水果": {"苹果": 30}}'
+    chartmove funcplot "正弦" --file data.csv --pi-ticks
     chartmove batch bar "月报/*.csv" --title "{name}销售概况" --col 销售额
 """
 from __future__ import annotations
@@ -19,6 +20,7 @@ from .table import (
     file_columns,
     file_links,
     file_matrix,
+    file_numeric_columns,
     file_samples,
     file_xy,
     parse_float,
@@ -27,6 +29,7 @@ from .themes import THEME_DESCS, THEME_LABELS, THEME_PACKS, THEMES
 
 _MULTI_TYPES = ('line-multi', 'bar-multi', 'radar')   # categories + series 型
 _XY_TYPES = ('scatter', 'bubble')                     # x/y 数值对型
+_MATH_TYPES = ('funcplot', 'polar', 'param', 'vector', 'contour', 'surface')
 
 # (类型名, help, items_help):单图子命令与 batch 共用这份清单
 _CHART_TYPES = (
@@ -54,6 +57,12 @@ _CHART_TYPES = (
     ('dumbbell', '哑铃图/坡度图(--slope)', None),
     ('sankey', '桑基图(左→右流量走向)', None),
     ('sunburst', '旭日图(两级层级占比,--data 传层级 JSON)', None),
+    ('funcplot', '函数图像 y=f(x)(科学绘图)', None),
+    ('polar', '极坐标曲线 r(θ)', None),
+    ('param', '参数曲线/相轨线', None),
+    ('vector', '矢量场/流线/方向场(--mode 切换)', None),
+    ('contour', '等高线图(矩阵或 x,y,z 长表)', None),
+    ('surface', '三维曲面 f(x,y),--animate 相机环绕', None),
 )
 
 
@@ -436,6 +445,144 @@ def _run_sankey(kind, args):
     return fn(args.title, items, **kw)
 
 
+# ---------- math 域(科学绘图)各类型的运行逻辑 ----------
+
+def _run_funcplot(kind, args):
+    """funcplot:--file 第 1 列 x、其余列 = 各曲线 y(列表头 = 曲线名,多列自动多曲线),
+    或 --x/--y 内联,或 --data(curves 或 x/y 字段)。"""
+    fn = _chart_fn(kind)
+    kw = _common_kwargs(args)
+    extra = dict(pi_ticks=args.pi_ticks, equal=args.equal, sample=args.sample or None)
+    if args.file:
+        cols = file_numeric_columns(args.file, sheet=getattr(args, 'sheet', None))
+        if len(cols) < 2:
+            raise ValueError('funcplot 的 --file 需要第 1 列 x + 至少 1 列 y')
+        xs = cols[0][1]
+        if len(cols) == 2:
+            return fn(args.title, xs, cols[1][1], name=cols[1][0], **extra, **kw)
+        curves = [(nm, xs, ys) for nm, ys in cols[1:]]
+        return fn(args.title, curves=curves, **extra, **kw)
+    d = _load_json(args.data) if args.data else {}
+    if 'curves' in d:
+        return fn(args.title, curves=[(str(c[0]), c[1], c[2]) for c in d['curves']],
+                  **extra, **kw)
+    xs = _num_list(args.x) if args.x else d.get('x')
+    ys = _num_list(args.y) if args.y else d.get('y')
+    if not xs or not ys:
+        raise ValueError('funcplot 需要 --x/--y、--file,或 --data(curves / x / y 字段)')
+    return fn(args.title, xs, ys, **extra, **kw)
+
+
+def _run_polar(kind, args):
+    """polar:--file 2 列数值(theta、r)或 --x/--y(弧度制);--fill 填充到圆心。"""
+    fn = _chart_fn(kind)
+    kw = _common_kwargs(args)
+    extra = dict(fill=args.fill, theta_pi=not args.no_theta_pi)
+    if args.file:
+        cols = file_numeric_columns(args.file, 2, sheet=getattr(args, 'sheet', None))
+        return fn(args.title, cols[0][1], cols[1][1], **extra, **kw)
+    d = _load_json(args.data) if args.data else {}
+    xs = _num_list(args.x) if args.x else d.get('x')
+    ys = _num_list(args.y) if args.y else d.get('y')
+    if not xs or not ys:
+        raise ValueError('polar 需要 --x/--y(theta 与 r,弧度制)、--file(2 列),'
+                         '或 --data(x / y 字段)')
+    return fn(args.title, xs, ys, **extra, **kw)
+
+
+def _run_param(kind, args):
+    """param:--file 2 列(x、y)或 3 列(t、x、y,取后两列),或 --x/--y;
+    保持数据顺序(时间序即几何序),默认等比例。"""
+    fn = _chart_fn(kind)
+    kw = _common_kwargs(args)
+    extra = dict(arrows=args.arrows, equal=not args.no_equal, pi_ticks=args.pi_ticks)
+    if args.file:
+        cols = file_numeric_columns(args.file, sheet=getattr(args, 'sheet', None))
+        if len(cols) == 2:
+            xy = (cols[0][1], cols[1][1])
+        elif len(cols) == 3:
+            xy = (cols[1][1], cols[2][1])   # t,x,y:取后两列,t 不参与绘制
+        else:
+            raise ValueError(f'param 的 --file 需要 2 列(x、y)或 3 列(t、x、y),'
+                             f'收到 {len(cols)} 列')
+        return fn(args.title, *xy, **extra, **kw)
+    d = _load_json(args.data) if args.data else {}
+    xs = _num_list(args.x) if args.x else d.get('x')
+    ys = _num_list(args.y) if args.y else d.get('y')
+    if not xs or not ys:
+        raise ValueError('param 需要 --x/--y、--file(2 列或 t,x,y 三列),'
+                         '或 --data(x / y 字段)')
+    return fn(args.title, xs, ys, **extra, **kw)
+
+
+def _run_vector(kind, args):
+    """vector:--file 4 列数值(x、y、u、v)或 --x/--y/--u/--v;--mode 切
+    quiver 箭头 / stream 流线 / dir 方向场。"""
+    fn = _chart_fn(kind)
+    kw = _common_kwargs(args)
+    extra = dict(mode=args.mode, density=args.density)
+    if args.file:
+        cols = file_numeric_columns(args.file, 4, sheet=getattr(args, 'sheet', None))
+        return fn(args.title, cols[0][1], cols[1][1], cols[2][1], cols[3][1],
+                  **extra, **kw)
+    d = _load_json(args.data) if args.data else {}
+    xs = _num_list(args.x) if args.x else d.get('x')
+    ys = _num_list(args.y) if args.y else d.get('y')
+    us = _num_list(args.u) if args.u else d.get('u')
+    vs = _num_list(args.v) if args.v else d.get('v')
+    if not (xs and ys and us and vs):
+        raise ValueError('vector 需要 --x/--y/--u/--v、--file(4 列),'
+                         '或 --data(x / y / u / v 字段)')
+    return fn(args.title, xs, ys, us, vs, **extra, **kw)
+
+
+def _levels_arg(text):
+    """--levels:整数级数或逗号分隔分级列表(contour levels 直通)。"""
+    if not text:
+        return None
+    if ',' in text or '，' in text:
+        return _num_list(text)
+    try:
+        return int(text)
+    except ValueError:
+        raise ValueError(f"--levels 需为整数或逗号分隔数值,收到 {text!r}") from None
+
+
+def _run_field(kind, args):
+    """contour / surface 共用:--file 矩阵布局(行名/列名 = 数值坐标)或 --long 切
+    3 列长表(x,y,z);内联 --x/--y/--z 或 --data(rows/cols/values,rows=y、cols=x)。"""
+    fn = _chart_fn(kind)
+    kw = _common_kwargs(args)
+    if kind == 'contour':
+        extra = dict(filled=not args.no_fill, colorbar=not args.no_colorbar,
+                     levels=_levels_arg(args.levels), pi_ticks=args.pi_ticks)
+    else:
+        extra = dict(colorbar=not args.no_colorbar, elev=args.elev, azim=args.azim)
+    if args.file:
+        if args.long:
+            cols = file_numeric_columns(args.file, 3, sheet=getattr(args, 'sheet', None))
+            return fn(args.title, cols[0][1], cols[1][1], cols[2][1], **extra, **kw)
+        rows, col_names, matrix = file_matrix(args.file, getattr(args, 'cat_col', None),
+                                              getattr(args, 'sheet', None))
+        try:
+            ys = [parse_float(v, '(行坐标)') for v in rows]
+            xs = [parse_float(v, '(列坐标)') for v in col_names]
+        except ValueError as e:
+            raise ValueError('矩阵布局的行名/列名需为数值坐标;'
+                             f'x,y,z 长表请加 --long。{e}') from e
+        return fn(args.title, xs, ys, matrix, **extra, **kw)
+    d = _load_json(args.data) if args.data else {}
+    if all(k in d for k in ('rows', 'cols', 'values')):
+        return fn(args.title, d['cols'], d['rows'], d['values'], **extra, **kw)
+    xs = _num_list(args.x) if args.x else d.get('x')
+    ys = _num_list(args.y) if args.y else d.get('y')
+    zs = _num_list(args.z) if args.z else d.get('z')
+    if xs and ys and zs:
+        return fn(args.title, xs, ys, zs, **extra, **kw)
+    raise ValueError(f'{kind} 需要 --file(矩阵布局,或 --long 3 列长表)、'
+                     '--x/--y/--z,或 --data(rows/cols/values 或 x/y/z)')
+
+
 def _default_run(kind, args):
     """无专属 runner 的类目型类型(pie/donut/rose/treemap/pareto/funnel)的默认路径:
     --percent 仅饼家族透传,数据走 --file 单列或位置对/--data。"""
@@ -472,6 +619,12 @@ _RUNNERS = {
     'gantt': _run_gantt,
     'dumbbell': _run_dumbbell,
     'sankey': _run_sankey,
+    'funcplot': _run_funcplot,
+    'polar': _run_polar,
+    'param': _run_param,
+    'vector': _run_vector,
+    'contour': _run_field,
+    'surface': _run_field,
 }
 
 
@@ -519,6 +672,14 @@ def _prep_batch_args(args, kind: str, file: Path, title: str) -> None:
     args.series = None
     args.categories = args.starts = args.ends = None
     args.slope = False
+    args.pi_ticks = args.equal = False
+    args.fill = args.no_theta_pi = args.arrows = args.no_equal = False
+    args.mode, args.density = 'quiver', 1.0
+    args.long = args.levels = args.no_fill = args.no_colorbar = False
+    args.elev, args.azim = 28.0, -60.0
+    args.u = args.v = args.z = None
+    if kind in _MATH_TYPES and args.numfmt == 'auto':
+        args.numfmt = 'plain'   # math 域默认 plain(万/亿刻度对数学轴无意义)
 
 
 def _run_batch(args) -> int:
@@ -592,7 +753,7 @@ def _add_shared_opts(p, *, out=True, data_src=True) -> None:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    """组装子命令:24 个单图类型共用 common 参数面,再按类型挂专属参数;
+    """组装子命令:30 个单图类型共用 common 参数面,再按类型挂专属参数;
     每个子命令把 (runner, 类型名) 绑进 defaults,main 只管调用。"""
     ap = argparse.ArgumentParser(
         prog='chartmove', description='中文数据图表生成器(默认输出 ./Results/)')
@@ -669,6 +830,51 @@ def _build_parser() -> argparse.ArgumentParser:
                                help='标签追加占合计 %%(原始值保留,自动归一,如 120 (31%%))')
     sps['sunburst'].add_argument('--percent', action='store_true',
                                  help='外环子类目标签追加占合计 %%')
+
+    # math 域(科学绘图):数据为数值序列/矩阵,无 类目=值 位置数据;默认 numfmt=plain
+    for name in _MATH_TYPES:
+        sps[name].set_defaults(numfmt='plain')
+    sps['funcplot'].add_argument('--x', help='x 数值,逗号分隔(或 --data 的 x 字段)')
+    sps['funcplot'].add_argument('--y', help='y 数值,逗号分隔')
+    sps['funcplot'].add_argument('--sample', type=int, help='LTTB 保形降采样目标点数')
+    sps['funcplot'].add_argument('--pi-ticks', action='store_true',
+                                 help='刻度按 π/2 步进,渲染 π 分数标签')
+    sps['funcplot'].add_argument('--equal', action='store_true', help='等比例坐标')
+    sps['polar'].add_argument('--x', help='theta 数值(弧度),逗号分隔')
+    sps['polar'].add_argument('--y', help='r 数值,逗号分隔')
+    sps['polar'].add_argument('--fill', action='store_true', help='填充曲线到圆心')
+    sps['polar'].add_argument('--no-theta-pi', action='store_true',
+                              help='theta 刻度不用 π 分数(用普通数值)')
+    sps['param'].add_argument('--x', help='x 数值,逗号分隔')
+    sps['param'].add_argument('--y', help='y 数值,逗号分隔')
+    sps['param'].add_argument('--arrows', action='store_true', help='沿轨迹叠加方向箭头')
+    sps['param'].add_argument('--no-equal', action='store_true', help='关闭等比例坐标')
+    sps['param'].add_argument('--pi-ticks', action='store_true',
+                              help='刻度按 π/2 步进,渲染 π 分数标签')
+    sps['vector'].add_argument('--x', help='x 数值,逗号分隔')
+    sps['vector'].add_argument('--y', help='y 数值,逗号分隔')
+    sps['vector'].add_argument('--u', help='u 分量,逗号分隔')
+    sps['vector'].add_argument('--v', help='v 分量,逗号分隔')
+    sps['vector'].add_argument('--mode', choices=['quiver', 'stream', 'dir'],
+                               default='quiver',
+                               help='quiver 箭头场(默认)/ stream 流线 / dir 方向场')
+    sps['vector'].add_argument('--density', type=float, default=1.0,
+                               help='stream 流线密度(默认 1)')
+    for name in ('contour', 'surface'):
+        sps[name].add_argument('--x', help='长表 x 坐标,逗号分隔(配 --y/--z)')
+        sps[name].add_argument('--y', help='长表 y 坐标,逗号分隔')
+        sps[name].add_argument('--z', help='长表 z 数值,逗号分隔')
+        sps[name].add_argument('--long', action='store_true',
+                               help='--file 按 3 列长表(x,y,z)解析(默认矩阵布局:行名列名=坐标)')
+        sps[name].add_argument('--no-colorbar', action='store_true', help='不显示色条')
+    sps['contour'].add_argument('--levels',
+                                help='等高线级数(整数)或分级列表(逗号分隔)')
+    sps['contour'].add_argument('--no-fill', action='store_true', help='只画线不填充')
+    sps['contour'].add_argument('--pi-ticks', action='store_true',
+                                help='刻度按 π/2 步进,渲染 π 分数标签')
+    sps['surface'].add_argument('--elev', type=float, default=28.0, help='视角仰角(默认 28)')
+    sps['surface'].add_argument('--azim', type=float, default=-60.0,
+                                help='视角方位角(默认 -60;--animate 自此环绕一周)')
 
     batch_sp = sub.add_parser('batch',
                               help='批量出图:每份 CSV/Excel 各生成一张同类型图表')

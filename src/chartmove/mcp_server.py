@@ -17,18 +17,19 @@ from .table import (
     file_columns,
     file_links,
     file_matrix,
+    file_numeric_columns,
     file_samples,
     file_xy,
     parse_float,
 )
 from .themes import THEME_DESCS, THEME_LABELS, THEME_PACKS, THEMES
 
-# 24 种图表类型与 5 种输出格式(与 CLI _CHART_TYPES / render 的格式表对应)
+# 30 种图表类型与 5 种输出格式(与 CLI _CHART_TYPES / render 的格式表对应)
 ChartType = Literal[
     'bar', 'line', 'line-multi', 'area', 'pie', 'donut', 'combo', 'bar-multi',
     'radar', 'scatter', 'bubble', 'hist', 'box', 'violin', 'heatmap', 'waterfall',
     'funnel', 'rose', 'treemap', 'gantt', 'dumbbell', 'sankey', 'sunburst',
-    'pareto']
+    'pareto', 'funcplot', 'polar', 'param', 'vector', 'contour', 'surface']
 Fmt = Literal['png', 'pdf', 'tif', 'gif', 'mp4']
 
 
@@ -44,12 +45,13 @@ _PAIR_TYPES = ('bar', 'line', 'area', 'pie', 'donut', 'waterfall', 'funnel', 'ro
 _SHARE_TYPES = ('pie', 'donut', 'rose', 'treemap')  # percent=true 标签追加占合计 %
 _SERIES_TYPES = ('line-multi', 'bar-multi', 'radar')  # categories + series 型
 _XY_TYPES = ('scatter', 'bubble')               # x/y 数值对型
+_MATH_TYPES = ('funcplot', 'polar', 'param', 'vector', 'contour', 'surface')
 
 server = MCPServer(
     name='chartmove',
     version=__version__,
     instructions=(
-        'Chinese chart generator: 24 chart types x 15 themes, no font configuration '
+        'Chinese chart generator: 30 chart types x 15 themes, no font configuration '
         'needed, output is a persistent file. Use list_themes to discover styles. '
         'Call make_chart with inline data or a CSV/Excel file path (file param); '
         'the returned "path" (absolute path to the image file) IS the deliverable - '
@@ -133,6 +135,22 @@ def _bins(bins):
         'violin: same series shape, KDE density shape per group with inner '
         'IQR bar + median dot, needs >=2 distinct values per group; '
         'heatmap: rows + cols + matrix (2-D numeric). '
+        'Math types (scientific plotting on continuous numeric axes; numfmt '
+        'defaults to plain): '
+        'funcplot: x + y, or curves=[[name, x, y], ...] to overlay curves, '
+        'pi_ticks=true renders pi-fraction ticks; '
+        'polar: x = theta in radians, y = r (data order preserved), '
+        'fill=true fills the curve to the center; '
+        'param: x + y trajectory drawn in data order (phase portrait), '
+        'arrows=true adds direction arrows; '
+        'vector: x + y + u + v, mode=quiver (default) / stream / dir, '
+        'density for stream (stream needs a complete evenly-spaced grid, '
+        'auto-rebuilt from the long table); '
+        'contour: x + y + z long table or rows + cols + matrix '
+        '(rows = y coords, cols = x coords, both numeric), filled contours '
+        '+ colorbar; '
+        'surface: same data as contour in 3-D; animate=true orbits the camera '
+        '360 degrees (elev / azim set the view angle). '
         'file (optional): path to a CSV/Excel file (.csv/.xlsx, first row = header) '
         'to read data from - takes precedence over inline data params. '
         'cat_col / col select the category column / one value column '
@@ -149,6 +167,13 @@ def _bins(bins):
         'scatter/bubble: columns x, y (, sizes) (, labels); '
         'hist: 1st column = raw samples; '
         'heatmap: 1st column = row names, remaining columns = matrix. '
+        'math types: funcplot 1st column = x, remaining columns = curves '
+        '(headers = curve names); polar 2 columns theta,r; param 2 columns '
+        'x,y or 3 columns t,x,y (t not plotted); vector 4 columns x,y,u,v '
+        '(rows with missing cells are dropped whole to keep points aligned); '
+        'contour/surface matrix layout by default (1st column = y coords, '
+        'header row = x coords, both must be numeric), long=true reads '
+        '3 columns x,y,z instead. '
         'animate=true gives a GIF (plays once, stops on last frame by default; '
         'loop=true makes it loop forever - GIF only, mp4 looping is decided by '
         'the video player so loop=true with fmt=mp4 is rejected); '
@@ -197,6 +222,18 @@ def make_chart(
     slope: bool = False,
     hierarchy: dict[str, dict[str, float]] | list | None = None,
     links: list | None = None,
+    u: list[float] | None = None,
+    v: list[float] | None = None,
+    z: list[float] | None = None,
+    curves: list | None = None,
+    mode: Literal['quiver', 'stream', 'dir'] = 'quiver',
+    density: float = 1.0,
+    pi_ticks: bool = False,
+    fill: bool = False,
+    arrows: bool = False,
+    elev: float = 28.0,
+    azim: float = -60.0,
+    long: bool = False,
     numfmt: Literal['auto', 'plain', 'percent'] = 'auto',
     note: str | None = None,
     file: str | None = None,
@@ -211,7 +248,9 @@ def make_chart(
     bins = _bins(bins)  # hist 专用:整数 / 'auto' / 严格递增边界(非法给中文错)
     common: dict[str, Any] = dict(style=style, animate=animate, fmt=fmt, loop=loop,
                                   out=out, out_dir=out_dir, numfmt=numfmt, note=note)
-    if type in ('line', 'area', 'line-multi'):  # sample 仅折线类支持
+    if type in _MATH_TYPES and numfmt == 'auto':
+        common['numfmt'] = 'plain'   # math 域默认 plain(与 CLI set_defaults 一致)
+    if type in ('line', 'area', 'line-multi', 'funcplot'):  # sample 仅折线类/函数图支持
         common['sample'] = sample
     if type == 'line':  # 区间带仅单系列折线支持
         common['lower'], common['upper'] = lower, upper
@@ -221,7 +260,10 @@ def make_chart(
             if file is not None:  # 文件数据优先于内联参数(与 CLI --file 一致)
                 return _from_file(type, title, file, cat_col, col, sheet, common,
                                   horizontal=horizontal, trend=trend, total=total,
-                                  stacked=stacked, percent=percent, bins=bins, slope=slope)
+                                  stacked=stacked, percent=percent, bins=bins, slope=slope,
+                                  mode=mode, density=density, pi_ticks=pi_ticks,
+                                  fill=fill, arrows=arrows, elev=elev, azim=azim,
+                                  long=long)
             if type == 'area' and (series is not None or stacked or percent):
                 # 多系列面积(可堆积):series 给出,或单系列误传堆积开关时给出指路错误
                 if series is None:
@@ -308,11 +350,6 @@ def make_chart(
                          'sankey 需要 links=[[源, 目标, 数值], ...]')
                 return _result(_chart_fn('sankey')(title, links, **common),
                                type, style, animate)
-            if type == 'sankey':
-                _require(links is not None,
-                         'sankey 需要 links=[[源, 目标, 数值], ...]')
-                return _result(_chart_fn('sankey')(title, links, **common),
-                               type, style, animate)
             if type == 'sunburst':
                 _require(hierarchy is not None,
                          'sunburst 需要 hierarchy(两级层级数据,'
@@ -320,14 +357,62 @@ def make_chart(
                 return _result(_chart_fn('sunburst')(title, hierarchy, percent=percent,
                                                      **common),
                                type, style, animate)
+            if type in _MATH_TYPES:
+                return _result(_math_chart(type, title, x=x, y=y, u=u, v=v, z=z,
+                                           curves=curves, rows=rows, cols=cols,
+                                           matrix=matrix, mode=mode, density=density,
+                                           pi_ticks=pi_ticks, fill=fill, arrows=arrows,
+                                           elev=elev, azim=azim, common=common),
+                               type, style, animate)
             raise ToolError(f'未知图表类型 {type!r},'
                             f'可选:{", ".join(get_args(ChartType))}')
     except (ValueError, RuntimeError, OSError) as e:  # 中文校验消息 → ToolError
         raise ToolError(str(e)) from e
 
 
+def _math_chart(type, title, *, x, y, u, v, z, curves, rows, cols, matrix, mode,
+                density, pi_ticks, fill, arrows, elev, azim, common):
+    """math 域内联数据分发(数值序列/矩阵,列约定见 make_chart description);
+    返回 Path,由调用方包 _result。"""
+    fn = _chart_fn(type)
+    if type == 'funcplot':
+        if curves is not None:
+            cs = [(str(c[0]), c[1], c[2]) for c in curves]
+            return fn(title, curves=cs, pi_ticks=pi_ticks, **common)
+        _require(x is not None and y is not None,
+                 'funcplot 需要 x 与 y(或 curves=[[名称, x, y], ...])')
+        return fn(title, x, y, pi_ticks=pi_ticks, **common)
+    if type == 'polar':
+        _require(x is not None and y is not None,
+                 'polar 需要 x(theta,弧度)与 y(r)')
+        return fn(title, x, y, fill=fill, **common)
+    if type == 'param':
+        _require(x is not None and y is not None, 'param 需要 x 与 y')
+        return fn(title, x, y, arrows=arrows, pi_ticks=pi_ticks, **common)
+    if type == 'vector':
+        _require(x is not None and y is not None and u is not None and v is not None,
+                 'vector 需要 x、y、u、v 四个等长数值序列')
+        return fn(title, x, y, u, v, mode=mode, density=density, **common)
+    if type == 'contour':
+        if rows is not None and cols is not None and matrix is not None:
+            return fn(title, cols, rows, matrix, pi_ticks=pi_ticks, **common)
+        _require(x is not None and y is not None and z is not None,
+                 'contour 需要 x、y、z(长表)或 rows/cols/matrix(矩阵,'
+                 'rows=y 坐标、cols=x 坐标)')
+        return fn(title, x, y, z, pi_ticks=pi_ticks, **common)
+    # surface
+    if rows is not None and cols is not None and matrix is not None:
+        return fn(title, cols, rows, matrix, elev=elev, azim=azim, **common)
+    _require(x is not None and y is not None and z is not None,
+             'surface 需要 x、y、z(长表)或 rows/cols/matrix(矩阵,'
+             'rows=y 坐标、cols=x 坐标)')
+    return fn(title, x, y, z, elev=elev, azim=azim, **common)
+
+
 def _from_file(type, title, file, cat_col, col, sheet, common, *, horizontal, trend,
-               total, stacked, percent, bins, slope) -> str:
+               total, stacked, percent, bins, slope, mode='quiver', density=1.0,
+               pi_ticks=False, fill=False, arrows=False, elev=28.0, azim=-60.0,
+               long=False) -> str:
     """file 数据出图:列约定与 CLI --file 一致,数据转换复用 table.py。"""
 
     def done(path, type_name: str):
@@ -418,6 +503,49 @@ def _from_file(type, title, file, cat_col, col, sheet, common, *, horizontal, tr
     if type == 'sankey':
         return done(_chart_fn('sankey')(title, file_links(file, sheet), **common),
                     type)
+    if type in _MATH_TYPES:
+        if type == 'funcplot':
+            cols = file_numeric_columns(file, sheet=sheet)
+            _require(len(cols) >= 2, 'funcplot 的 file 需要第 1 列 x + 至少 1 列 y')
+            xs = cols[0][1]
+            if len(cols) == 2:
+                return done(_chart_fn('funcplot')(title, xs, cols[1][1],
+                                                  name=cols[1][0], pi_ticks=pi_ticks,
+                                                  **common), type)
+            cs = [(nm, xs, ys) for nm, ys in cols[1:]]
+            return done(_chart_fn('funcplot')(title, curves=cs, pi_ticks=pi_ticks,
+                                              **common), type)
+        if type == 'polar':
+            cols = file_numeric_columns(file, 2, sheet=sheet)
+            return done(_chart_fn('polar')(title, cols[0][1], cols[1][1], fill=fill,
+                                           **common), type)
+        if type == 'param':
+            cols = file_numeric_columns(file, sheet=sheet)
+            _require(len(cols) in (2, 3),
+                     f'param 的 file 需要 2 列(x、y)或 3 列(t、x、y),'
+                     f'收到 {len(cols)} 列')
+            a, b = ((cols[1][1], cols[2][1]) if len(cols) == 3
+                    else (cols[0][1], cols[1][1]))
+            return done(_chart_fn('param')(title, a, b, arrows=arrows,
+                                           pi_ticks=pi_ticks, **common), type)
+        if type == 'vector':
+            cols = file_numeric_columns(file, 4, sheet=sheet)
+            return done(_chart_fn('vector')(title, cols[0][1], cols[1][1],
+                                            cols[2][1], cols[3][1], mode=mode,
+                                            density=density, **common), type)
+        # contour / surface:矩阵布局(行列名 = 数值坐标)或 long=true 切 3 列长表
+        if long:
+            cols = file_numeric_columns(file, 3, sheet=sheet)
+            return done(_chart_fn(type)(title, cols[0][1], cols[1][1], cols[2][1],
+                                        **common), type)
+        rlabels, col_names, mat = file_matrix(file, cat_col, sheet)
+        try:
+            ys = [parse_float(v, '(行坐标)') for v in rlabels]
+            xs = [parse_float(v, '(列坐标)') for v in col_names]
+        except ValueError as e:
+            raise ToolError(f'矩阵布局的行名/列名需为数值坐标,'
+                            f'x,y,z 长表请传 long=true;{e}') from e
+        return done(_chart_fn(type)(title, xs, ys, mat, **common), type)
     if type == 'sunburst':
         raise ToolError('sunburst 暂不支持 file 数据(层级数据请用 hierarchy 内联参数)')
     raise ToolError(f'未知图表类型 {type!r},可选:{", ".join(get_args(ChartType))}')

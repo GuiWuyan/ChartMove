@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from matplotlib.ticker import MultipleLocator
 
-from chartmove import contour, funcplot, param, polar, surface, vector
+from chartmove import cli, contour, funcplot, param, polar, surface, vector
 from chartmove.graph.charts.math import (
     MAX_POINTS,
     _check_range,
@@ -274,3 +274,72 @@ def test_surface_orbit_gif(tmp_path):
                    out='m2_surf_gif', out_dir=tmp_path)
     assert path.exists()
     path.unlink()
+
+
+# ==================== M4:CLI 入口接线(文件/内联双入口) ====================
+
+def _csv(tmp_path, text, name='d.csv'):
+    p = tmp_path / name
+    p.write_text(text, encoding='utf-8')
+    return str(p)
+
+
+def test_cli_funcplot_inline_and_piticks(tmp_path):
+    assert cli.main(['funcplot', '正弦', '--x', '0,0.5,1', '--y', '0,1,0',
+                     '--pi-ticks', '--out-dir', str(tmp_path), '--out', 'm4_f']) == 0
+    assert (tmp_path / 'm4_f.png').exists()
+
+
+def test_cli_polar_inline(tmp_path):
+    assert cli.main(['polar', '玫瑰', '--x', '0,0.79,1.57', '--y', '0,1,0',
+                     '--fill', '--out-dir', str(tmp_path), '--out', 'm4_p']) == 0
+    assert (tmp_path / 'm4_p.png').exists()
+
+
+def test_cli_param_file_three_columns(tmp_path):
+    f = _csv(tmp_path, 't,x,y\n0,1,0\n1,0.54,0.84\n2,0,1\n')
+    assert cli.main(['param', '相轨线', '--file', f, '--arrows',
+                     '--out-dir', str(tmp_path), '--out', 'm4_param']) == 0
+    assert (tmp_path / 'm4_param.png').exists()
+
+
+def test_cli_vector_file_stream(tmp_path):
+    rows = ['x,y,u,v']
+    for i in range(4):
+        for j in range(4):
+            x, y = -1.5 + i, -1.5 + j
+            rows.append(f'{x},{y},{-y},{x}')
+    f = _csv(tmp_path, '\n'.join(rows) + '\n', name='field.csv')
+    assert cli.main(['vector', '流线', '--file', f, '--mode', 'stream',
+                     '--out-dir', str(tmp_path), '--out', 'm4_v']) == 0
+    assert (tmp_path / 'm4_v.png').exists()
+
+
+def test_cli_vector_stream_uneven_grid_fails(tmp_path):
+    f = _csv(tmp_path, 'x,y,u,v\n0,0,0,1\n0.1,0,0,1\n0.5,0,0,1\n2,0,0,1\n')
+    assert cli.main(['vector', '场', '--file', f, '--mode', 'stream',
+                     '--out-dir', str(tmp_path)]) == 1
+
+
+def test_cli_contour_matrix_file(tmp_path):
+    f = _csv(tmp_path, ',0,1,2\n0,0,0,0\n1,0,1,2\n2,0,2,4\n', name='grid.csv')
+    assert cli.main(['contour', 'z=xy', '--file', f,
+                     '--out-dir', str(tmp_path), '--out', 'm4_c']) == 0
+    assert (tmp_path / 'm4_c.png').exists()
+
+
+def test_cli_surface_long_file(tmp_path):
+    f = _csv(tmp_path, 'x,y,z\n0,0,0\n1,0,0\n0,1,0\n1,1,1\n')
+    assert cli.main(['surface', '曲面', '--file', f, '--long',
+                     '--out-dir', str(tmp_path), '--out', 'm4_s']) == 0
+    assert (tmp_path / 'm4_s.png').exists()
+
+
+def test_cli_funcplot_batch_multi_files(tmp_path):
+    _csv(tmp_path, 'x,y\n0,0\n1,1\n2,4\n', name='a.csv')
+    _csv(tmp_path, 'x,y\n0,1\n1,0\n2,1\n', name='b.csv')
+    out = tmp_path / 'batch'
+    assert cli.main(['batch', 'funcplot', str(tmp_path / '*.csv'),
+                     '--title', '{name}曲线', '--out-dir', str(out)]) == 0
+    names = {p.name for p in out.glob('*.png')}
+    assert any('a' in n for n in names) and any('b' in n for n in names)

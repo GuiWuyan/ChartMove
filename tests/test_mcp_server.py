@@ -158,7 +158,67 @@ def test_tools_listed():
         'bar', 'line', 'line-multi', 'area', 'pie', 'donut', 'combo', 'bar-multi',
         'radar', 'scatter', 'bubble', 'hist', 'box', 'violin', 'heatmap',
         'waterfall', 'funnel', 'rose', 'treemap', 'gantt', 'dumbbell', 'sankey',
-        'sunburst', 'pareto'}
+        'sunburst', 'pareto',
+        'funcplot', 'polar', 'param', 'vector', 'contour', 'surface'}
+
+
+def test_make_chart_funcplot_inline(tmp_path):
+    _, result = _call({
+        'type': 'funcplot', 'title': '正弦', 'x': [0, 1, 2, 3], 'y': [0, 1, 0, -1],
+        'pi_ticks': False, 'out_dir': str(tmp_path)})
+    assert not result.is_error
+    data = json.loads(result.content[0].text)
+    assert data['type'] == 'funcplot'
+    p = Path(data['path'])
+    assert p.exists() and p.stat().st_size > 0
+    p.unlink()
+
+
+def test_make_chart_param_needs_xy_chinese_error(tmp_path):
+    _, result = _call({'type': 'param', 'title': 't', 'x': [1, 2],
+                       'out_dir': str(tmp_path)})
+    assert result.is_error
+    assert 'param 需要 x 与 y' in result.content[0].text
+
+
+def test_make_chart_file_funcplot_multi_curve(tmp_path):
+    f = _csv(tmp_path, 'x,sin,cos\n0,0,1\n1,0.84,0.54\n2,0.91,-0.42\n')
+    _, result = _call({'type': 'funcplot', 'title': '两条曲线', 'file': f,
+                       'out_dir': str(tmp_path)})
+    assert not result.is_error
+    p = Path(json.loads(result.content[0].text)['path'])
+    assert p.exists() and p.stat().st_size > 0
+    p.unlink()
+
+
+def test_make_chart_file_vector_stream(tmp_path):
+    rows = ['x,y,u,v']
+    for i in range(5):
+        for j in range(5):
+            x, y = -2 + i, -2 + j
+            rows.append(f'{x},{y},{-y},{x}')
+    f = _csv(tmp_path, '\n'.join(rows) + '\n', name='field.csv')
+    _, result = _call({'type': 'vector', 'title': '辐旋', 'file': f,
+                       'mode': 'stream', 'out_dir': str(tmp_path)})
+    assert not result.is_error
+    p = Path(json.loads(result.content[0].text)['path'])
+    assert p.exists() and p.stat().st_size > 0
+    p.unlink()
+
+
+def test_make_chart_file_contour_matrix(tmp_path):
+    xs = [0.0, 0.5, 1.0]
+    header = ',' + ','.join(str(x) for x in xs)   # 左上角单元格不参与解析
+    rows = [header]
+    for y in (0.0, 0.5, 1.0):
+        rows.append(f'{y},' + ','.join(str(x * y) for x in xs))
+    f = _csv(tmp_path, '\n'.join(rows) + '\n', name='grid.csv')
+    _, result = _call({'type': 'contour', 'title': '平面 z=xy', 'file': f,
+                       'out_dir': str(tmp_path)})
+    assert not result.is_error
+    p = Path(json.loads(result.content[0].text)['path'])
+    assert p.exists() and p.stat().st_size > 0
+    p.unlink()
 
 
 def test_make_chart_bar_png(tmp_path):

@@ -1,6 +1,6 @@
 # ChartMove
 
-**中文数据图表生成器**:matplotlib 内核,24 种图表,15 套主题分属 4 个风格包,输出 PNG / PDF / TIF / GIF / MP4;入口为 CLI 与 MCP Server(AI / agent 调用)。
+**中文数据图表生成器**:matplotlib 内核,30 种图表,15 套主题分属 4 个风格包,输出 PNG / PDF / TIF / GIF / MP4;入口为 CLI 与 MCP Server(AI / agent 调用)。
 
 ## 目录结构
 
@@ -14,7 +14,7 @@
 
 命令结构:**`chartmove <类型> "标题" [数据] [参数]`**,产物默认写入 `./Results/`(同名自动加序号,不覆盖)。
 
-24 种类型,按用途分组(多词类型用 kebab-case):
+30 种类型,按用途分组(多词类型用 kebab-case):
 
 | 用途     | 类型                                                                                                                                                                  |
 |----------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -23,6 +23,7 @@
 | 分布     | `hist` 直方图 / `box` 箱线图 / `violin` 小提琴图                                                                                                                      |
 | 相关     | `scatter` 散点图 / `bubble` 气泡图 / `heatmap` 热力图                                                                                                                 |
 | 关系     | `radar` 雷达图 / `gantt` 甘特图 / `dumbbell` 哑铃图 / `sankey` 桑基图 / `sunburst` 旭日图                                                                             |
+| 科学绘图 | `funcplot` 函数图像 / `polar` 极坐标曲线 / `param` 参数曲线·相轨线 / `vector` 矢量场·流线·方向场 / `contour` 等高线 / `surface` 三维曲面(`--animate` 相机环绕)         |
 
 `chartmove --help` 看总览,`chartmove bar --help` 看单类型全部参数。
 
@@ -69,10 +70,16 @@
 | `waterfall`                          | `--no-total` 不追加合计柱                                                               |
 | `heatmap`                            | `--no-annotate` 不在格子标数值                                                          |
 | `sunburst`                           | `--data` 两级层级 JSON `{"父类目": {"子类目": 数值}}`、`--percent` 外环标签追加占合计 % |
+| `funcplot`                           | `--x` / `--y`、`--sample` LTTB 降采样、`--pi-ticks` π 分数刻度、`--equal` 等比例         |
+| `polar`                              | `--x`(theta,弧度)/ `--y`(r)、`--fill` 填充到圆心、`--no-theta-pi` 关 π 刻度             |
+| `param`                              | `--x` / `--y`、`--arrows` 方向箭头、`--no-equal` 关等比例、`--pi-ticks`                  |
+| `vector`                             | `--x` / `--y` / `--u` / `--v`、`--mode` quiver(默认)/ stream / dir、`--density` 流线密度 |
+| `contour`                            | `--x` / `--y` / `--z`、`--long` 长表布局、`--levels` 级数或分级、`--no-fill`、`--no-colorbar`、`--pi-ticks` |
+| `surface`                            | `--x` / `--y` / `--z`、`--long` 长表布局、`--no-colorbar`、`--elev` / `--azim` 视角     |
 
 注:`--percent` 一词两义——饼家族(`pie` / `donut` / `rose` / `treemap` / `sunburst`)是标签追加占比,`bar-multi` / `area` 是百分比堆积;若数据本身已是百分数,用通用的 `--numfmt percent` 只做格式化即可。
 
-**`--file` 列约定**(CSV 兼容 UTF-8 / GBK):首行表头,第 1 列类目、其余列数值——bar / line / area 多数值列自动升级多系列(系列名 = 表头),combo 取前两数值列(柱、线),box / violin 每列一组,sankey 取 3 列(源、目标、数值),scatter / bubble 按 x, y(, sizes)(, labels),heatmap 第 1 列行名,hist 第 1 列样本。
+**`--file` 列约定**(CSV 兼容 UTF-8 / GBK):首行表头,第 1 列类目、其余列数值——bar / line / area 多数值列自动升级多系列(系列名 = 表头),combo 取前两数值列(柱、线),box / violin 每列一组,sankey 取 3 列(源、目标、数值),scatter / bubble 按 x, y(, sizes)(, labels),heatmap 第 1 列行名,hist 第 1 列样本。math 域全为数值列、按行对齐(缺格整行剔除):funcplot 第 1 列 x、其余列 = 各曲线 y(多列自动多曲线),polar 2 列(theta, r),param 2 列(x, y)或 3 列(t, x, y 取后两列),vector 4 列(x, y, u, v),contour / surface 默认矩阵布局(首列 = y 坐标、首行 = x 坐标,需数值)或 `--long` 切 3 列长表(x, y, z)。
 
 ```bash
 chartmove bar "季度产量" Q1=120 Q2=200 --style mckinsey                        # 内联数据
@@ -80,6 +87,9 @@ chartmove pie "品类占比" 线上=55 门店=30 批发=15 --percent            
 chartmove line "营收预测" 1月=120 2月=135 --lower 112,125 --upper 128,145      # 区间带
 chartmove line "盈亏率" --file 基金.csv --cat-col 基金名称 --col "盈亏率(%)" --style cyberpunk   # 表格选列
 chartmove sunburst "销售构成" --data '{"水果": {"苹果": 30}}'                   # 层级 JSON
+chartmove funcplot "阻尼振荡" --file data.csv --pi-ticks                        # 科学绘图:文件 x,y(多列 = 多曲线)
+chartmove vector "流场" --file field.csv --mode stream                          # 矢量场出流线(x,y,u,v 四列)
+chartmove surface "鞍面" --file grid.csv --animate                              # 3D 曲面相机环绕 MP4/GIF
 chartmove themes --preview                                     # 主题预览拼版图
 ```
 
@@ -103,12 +113,12 @@ stdio 传输,2 个工具;工具描述为英文,校验错误以中文 `ToolError`
 
 | 工具          | 要点                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 |---------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `make_chart`  | `type`(24 种)+ `title`;数据参数按类型:`categories`/`values`、`series`、`links`(sankey)、`hierarchy`(sunburst)、`x`/`y`/`sizes`、`rows`/`cols`/`matrix`、`starts`/`ends`、`lower`/`upper`、`line_values`、`bins`;形态:`stacked`/`percent`/`horizontal`/`trend`/`labels`/`total`/`slope`;输出:`style`/`animate`/`loop`/`sample`/`numfmt`/`note`/`fmt`/`out`/`out_dir`;表格直读:`file`/`cat_col`/`col`/`sheet`(优先于内联数据,列约定同 CLI `--file`)。返回 `{path, file_size, ...}`,`path` 即交付物 |
+| `make_chart`  | `type`(30 种)+ `title`;数据参数按类型:`categories`/`values`、`series`、`links`(sankey)、`hierarchy`(sunburst)、`x`/`y`/`sizes`、`rows`/`cols`/`matrix`、`starts`/`ends`、`lower`/`upper`、`line_values`、`bins`、math 域:`u`/`v`/`z`/`curves`/`mode`/`density`/`pi_ticks`/`fill`/`arrows`/`elev`/`azim`/`long`;形态:`stacked`/`percent`/`horizontal`/`trend`/`labels`/`total`/`slope`;输出:`style`/`animate`/`loop`/`sample`/`numfmt`/`note`/`fmt`/`out`/`out_dir`;表格直读:`file`/`cat_col`/`col`/`sheet`(优先于内联数据,列约定同 CLI `--file`)。返回 `{path, file_size, ...}`,`path` 即交付物 |
 | `list_themes` | 15 套主题(4 风格包)名称 + 中文描述;`preview=true` 附拼版图路径                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 ## 图表能力
 
-- 24 种类型按用途分 5 组(类目构成 / 趋势 / 分布 / 相关 / 关系,见 CLI 节的类型总表;逐类型语义看 `--help` 与类型专属参数表)
+- 30 种类型按用途分 6 组(类目构成 / 趋势 / 分布 / 相关 / 关系 / 科学绘图,见 CLI 节的类型总表;逐类型语义看 `--help` 与类型专属参数表)
 - 15 套主题分 4 包(默认 business):学术 `academic` / `grayscale` / `ggplot` / `colorblind`;商务 `business` / `mckinsey` / `dashboard` / `sunset`;简约演示 `whitegrid` / `minimal` / `morandi` / `harvest`;其他 `sketch`(xkcd 手绘)/ `terminal` / `cyberpunk`
 - 输出:PNG(16:9,1920×1080)/ PDF 矢量 / TIF 600dpi / GIF"数据生长"动画(播一遍停末帧,可 `--loop`)/ MP4(需 ffmpeg);`figsize` / `dpi` 参数化
 - 体验:中文字体零配置(Windows 雅黑 / macOS 苹方 / Linux Noto CJK)、数值默认中文单位(`numfmt='auto'`:≥1e4 万、≥1e8 亿)、最大 / 最小值自动高亮、y 轴智能从 0 起、类目 >25 刻度自动抽稀
