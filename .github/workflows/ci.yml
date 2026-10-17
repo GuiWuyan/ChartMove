@@ -40,6 +40,9 @@ jobs:
         env:
           PYTHONIOENCODING: utf-8
       - run: python -c "import chartmove.mcp_server" # MCP 入口可导入
-      # PR 只跑冒烟(-m "not slow":跳过全速动画/全类型矩阵/MCP 会话,约 1 分钟);
-      # main push 与每周定时跑全量兜底
-      - run: pytest -q -n auto --dist loadgroup ${{ github.event_name == 'pull_request' && '-m not slow' || '' }}
+      # PR 只跑冒烟、main push 与每周一定时跑全量。注意走 PYTEST_ADDOPTS 且值里
+      # 自带单引号:pytest 用 shlex 拆词,"not slow" 不引住会被拆成 -m not + 位置
+      # 参数 slow,pytest 因标记表达式非法秒退(2026-10-14 踩过的坑)
+      - run: pytest -q -n auto --dist loadgroup
+        env:
+          PYTEST_ADDOPTS: ${{ github.event_name == 'pull_request' && '-m ''not slow''' || '' }}
