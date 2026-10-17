@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import math
 import sys
 from pathlib import Path
 from typing import Any, Literal, get_args
@@ -12,22 +13,25 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 from ._version import __version__
+from .errors import message
 from .table import (
     file_box_groups,
     file_columns,
     file_links,
     file_matrix,
+    file_numeric_columns,
     file_samples,
     file_xy,
     parse_float,
 )
 from .themes import THEME_DESCS, THEME_LABELS, THEME_PACKS, THEMES
 
+# 30 种图表类型与 5 种输出格式(与 CLI _CHART_TYPES / render 的格式表对应)
 ChartType = Literal[
     'bar', 'line', 'line-multi', 'area', 'pie', 'donut', 'combo', 'bar-multi',
     'radar', 'scatter', 'bubble', 'hist', 'box', 'violin', 'heatmap', 'waterfall',
     'funnel', 'rose', 'treemap', 'gantt', 'dumbbell', 'sankey', 'sunburst',
-    'pareto']
+    'pareto', 'funcplot', 'polar', 'param', 'vector', 'contour', 'surface']
 Fmt = Literal['png', 'pdf', 'tif', 'gif', 'mp4']
 
 
@@ -39,16 +43,17 @@ def _chart_fn(name: str):
     return getattr(graph, name.replace('-', '_'))
 
 _PAIR_TYPES = ('bar', 'line', 'area', 'pie', 'donut', 'waterfall', 'funnel', 'rose',
-               'treemap', 'pareto')
+               'treemap', 'pareto')            # categories + values 型
 _SHARE_TYPES = ('pie', 'donut', 'rose', 'treemap')  # percent=true 标签追加占合计 %
-_SERIES_TYPES = ('line-multi', 'bar-multi', 'radar')
-_XY_TYPES = ('scatter', 'bubble')
+_SERIES_TYPES = ('line-multi', 'bar-multi', 'radar')  # categories + series 型
+_XY_TYPES = ('scatter', 'bubble')               # x/y 数值对型
+_MATH_TYPES = ('funcplot', 'polar', 'param', 'vector', 'contour', 'surface')
 
 server = MCPServer(
     name='chartmove',
     version=__version__,
     instructions=(
-        'Chinese chart generator: 24 chart types x 15 themes, no font configuration '
+        'Chinese chart generator: 30 chart types x 15 themes, no font configuration '
         'needed, output is a persistent file. Use list_themes to discover styles. '
         'Call make_chart with inline data or a CSV/Excel file path (file param); '
         'the returned "path" (absolute path to the image file) IS the deliverable - '
@@ -62,6 +67,7 @@ server = MCPServer(
 
 
 def _require(cond, message: str) -> None:
+    """参数校验统一出口:条件不满足即抛中文 ToolError(模型可直接读懂并改参)。"""
     if not cond:
         raise ToolError(message)
 
@@ -123,7 +129,27 @@ def _bins(bins):
         'a {source, target, value} dict); flows left to right, node height = '
         'flow volume, cycles and non-positive values are rejected; '
         'line accepts lower + upper (same length as values) to draw a '
-        'semi-transparent prediction/confidence band; '
+        'semi-transparent prediction/confidence band, or err (symmetric errors, '
+        'e.g. SD/SEM) as a shorthand; err_style chooses band (default, '
+        'translucent band) or whisker (error-bar caps); '
+        'error bars (symmetric, same length as the data, >= 0): bar accepts '
+        'err (on bar tips, x-direction when horizontal=true); '
+        'line-multi / bar-multi accept errs = [[errors], ...] parallel to '
+        'series (a null entry skips that series; bar-multi grouped mode only - '
+        'rejected with stacked/percent); combo accepts bar_err / line_err; '
+        'scatter accepts xerr / yerr, trend_eq=true annotates the regression '
+        'equation and R-squared next to the trend line; '
+        'scatter groups = [[x, [replicate_readings], ...], ...] aggregates '
+        'replicates to mean +- SD per x (mutually exclusive with x/y; legend '
+        'defaults to 均值 ± SD), show_raw=true overlays the raw single readings '
+        'as open circles (needs groups); highlight=false removes the '
+        'best/worst max-min markers (auto-off in groups mode); '
+        'violin mean_sd=true overlays a mean diamond with a ±SD whisker per '
+        'group; '
+        'funcplot points = [[x, y, (err)], ...] overlays measured points with '
+        'error bars on the curve (experiment vs theory), points_fit=true adds '
+        'a linear fit of those points annotated with equation and R-squared, '
+        'points_name = legend label (default 实测点); '
         'scatter/bubble: x + y (+sizes for bubble, +labels optional); '
         'hist: values = raw samples, bins is an int, "auto", or a strictly '
         'increasing edge array (e.g. [1,10,20]); '
@@ -131,6 +157,31 @@ def _bins(bins):
         'violin: same series shape, KDE density shape per group with inner '
         'IQR bar + median dot, needs >=2 distinct values per group; '
         'heatmap: rows + cols + matrix (2-D numeric). '
+        'Math types (scientific plotting on continuous numeric axes; numfmt '
+        'defaults to plain): '
+        'funcplot: x + y, or curves=[[name, x, y], ...] to overlay curves, '
+        'pi_ticks=true renders pi-fraction ticks; '
+        'polar: x = theta in radians, y = r (data order preserved), '
+        'fill=true fills the curve to the center; '
+        'param: x + y trajectory drawn in data order (phase portrait), '
+        'arrows=true adds direction arrows; '
+        'vector: x + y + u + v, mode=quiver (default) / stream / dir, '
+        'density for stream (stream needs a complete evenly-spaced grid, '
+        'auto-rebuilt from the long table); '
+        'contour: x + y + z long table or rows + cols + matrix '
+        '(rows = y coords, cols = x coords, both numeric), filled contours '
+        '+ colorbar; '
+        'surface: same data as contour in 3-D; animate=true orbits the camera '
+        '360 degrees (elev / azim set the view angle). '
+        'Math types also accept expr = list of expression strings instead of '
+        'numeric arrays: variables x and y (2-D fields), t (param), theta '
+        '(polar); constants pi / e / tau; numpy math functions (sin, cos, exp, '
+        'log, sqrt, abs, where, clip, ...). Sampled over xmin/xmax (+ ymin/ymax '
+        'for 2-D fields; polar defaults to 0..2*pi); samples = point count '
+        '(curves, default 400) or grid points per axis (vector 20 / contour '
+        'surface 60). expr is mutually exclusive with the numeric data params; '
+        'unsafe constructs (attribute access, imports, chained powers, literal '
+        'exponents > 100) and unknown symbols are rejected with Chinese errors. '
         'file (optional): path to a CSV/Excel file (.csv/.xlsx, first row = header) '
         'to read data from - takes precedence over inline data params. '
         'cat_col / col select the category column / one value column '
@@ -147,6 +198,13 @@ def _bins(bins):
         'scatter/bubble: columns x, y (, sizes) (, labels); '
         'hist: 1st column = raw samples; '
         'heatmap: 1st column = row names, remaining columns = matrix. '
+        'math types: funcplot 1st column = x, remaining columns = curves '
+        '(headers = curve names); polar 2 columns theta,r; param 2 columns '
+        'x,y or 3 columns t,x,y (t not plotted); vector 4 columns x,y,u,v '
+        '(rows with missing cells are dropped whole to keep points aligned); '
+        'contour/surface matrix layout by default (1st column = y coords, '
+        'header row = x coords, both must be numeric), long=true reads '
+        '3 columns x,y,z instead. '
         'animate=true gives a GIF (plays once, stops on last frame by default; '
         'loop=true makes it loop forever - GIF only, mp4 looping is decided by '
         'the video player so loop=true with fmt=mp4 is rejected); '
@@ -190,11 +248,44 @@ def make_chart(
     sample: int | None = None,
     lower: list[float] | None = None,
     upper: list[float] | None = None,
+    err: list[float] | None = None,
+    err_style: Literal['band', 'whisker'] = 'band',
+    errs: list | None = None,
+    xerr: list[float] | None = None,
+    yerr: list[float] | None = None,
+    trend_eq: bool = False,
+    groups: list | None = None,
+    show_raw: bool = False,
+    highlight: bool | None = None,
+    bar_err: list[float] | None = None,
+    line_err: list[float] | None = None,
+    mean_sd: bool = False,
+    points: list | None = None,
+    points_name: str = '实测点',
+    points_fit: bool = False,
     starts: list[float] | None = None,
     ends: list[float] | None = None,
     slope: bool = False,
     hierarchy: dict[str, dict[str, float]] | list | None = None,
     links: list | None = None,
+    u: list[float] | None = None,
+    v: list[float] | None = None,
+    z: list[float] | None = None,
+    curves: list | None = None,
+    mode: Literal['quiver', 'stream', 'dir'] = 'quiver',
+    density: float = 1.0,
+    pi_ticks: bool = False,
+    fill: bool = False,
+    arrows: bool = False,
+    elev: float = 28.0,
+    azim: float = -60.0,
+    long: bool = False,
+    expr: list[str] | None = None,
+    xmin: float | None = None,
+    xmax: float | None = None,
+    ymin: float | None = None,
+    ymax: float | None = None,
+    samples: int | None = None,
     numfmt: Literal['auto', 'plain', 'percent'] = 'auto',
     note: str | None = None,
     file: str | None = None,
@@ -202,22 +293,30 @@ def make_chart(
     col: str | None = None,
     sheet: str | None = None,
 ) -> str:
+    """出图工具主入口:按 type 分发到 graph 内核,file 数据优先于内联参数;
+    内核中文校验错误在此统一转 ToolError。参数语义见上方 description(英文,给模型)。"""
     if style not in THEMES:  # 入口即校验:错误主题不许静默兜底成 business 再回显假答案
         raise ToolError(f'未知主题 {style!r};可选:{", ".join(THEMES)}')
     bins = _bins(bins)  # hist 专用:整数 / 'auto' / 严格递增边界(非法给中文错)
     common: dict[str, Any] = dict(style=style, animate=animate, fmt=fmt, loop=loop,
                                   out=out, out_dir=out_dir, numfmt=numfmt, note=note)
-    if type in ('line', 'area', 'line-multi'):  # sample 仅折线类支持
+    if type in _MATH_TYPES and numfmt == 'auto':
+        common['numfmt'] = 'plain'   # math 域默认 plain(与 CLI set_defaults 一致)
+    if type in ('line', 'area', 'line-multi', 'funcplot'):  # sample 仅折线类/函数图支持
         common['sample'] = sample
-    if type == 'line':  # 区间带仅单系列折线支持
+    if type == 'line':  # 区间带 / 对称误差仅单系列折线支持
         common['lower'], common['upper'] = lower, upper
+        common['err'], common['err_style'] = err, err_style
     try:
         # stdio 协议独占 stdout:内核里"图表已生成"等打印必须让道,否则污染 JSON-RPC 流
         with contextlib.redirect_stdout(sys.stderr):
             if file is not None:  # 文件数据优先于内联参数(与 CLI --file 一致)
                 return _from_file(type, title, file, cat_col, col, sheet, common,
                                   horizontal=horizontal, trend=trend, total=total,
-                                  stacked=stacked, percent=percent, bins=bins, slope=slope)
+                                  stacked=stacked, percent=percent, bins=bins, slope=slope,
+                                  mode=mode, density=density, pi_ticks=pi_ticks,
+                                  fill=fill, arrows=arrows, elev=elev, azim=azim,
+                                  long=long, inline_err=err)
             if type == 'area' and (series is not None or stacked or percent):
                 # 多系列面积(可堆积):series 给出,或单系列误传堆积开关时给出指路错误
                 if series is None:
@@ -234,7 +333,8 @@ def make_chart(
                          'categories 与 values 不能为空')
                 if type == 'bar':
                     return _result(_chart_fn('bar')(title, categories, values,
-                                                    horizontal=horizontal, **common),
+                                                    horizontal=horizontal, err=err,
+                                                    **common),
                                    type, style, animate)
                 if type == 'waterfall':
                     return _result(_chart_fn('waterfall')(title, categories, values,
@@ -249,22 +349,35 @@ def make_chart(
                          and line_values is not None,
                          'combo 需要 categories、values(柱值)与 line_values(线值)')
                 return _result(_chart_fn('combo')(title, categories, values,
-                                                  line_values, **common),
+                                                  line_values, bar_err=bar_err,
+                                                  line_err=line_err, **common),
                                type, style, animate)
             if type in _SERIES_TYPES:
                 _require(categories is not None and series is not None,
                          '多系列图需要 categories 与 series')
                 extra = ({'stacked': stacked, 'percent': percent}
                          if type == 'bar-multi' else {})
+                if errs is not None:
+                    extra['errs'] = errs
                 return _result(_chart_fn(type)(title, categories,
                                                _norm_series(series), **extra, **common),
                                type, style, animate)
             if type in ('box', 'violin'):
                 _require(series is not None,
                          f'{type} 需要 series=[[组名, [样本...]], ...]')
-                return _result(_chart_fn(type)(title, _norm_series(series), **common),
+                extra = {'mean_sd': mean_sd} if type == 'violin' else {}
+                return _result(_chart_fn(type)(title, _norm_series(series), **extra,
+                                               **common),
                                type, style, animate)
             if type in _XY_TYPES:
+                if type == 'scatter' and groups is not None:
+                    _require(x is None and y is None,
+                             'scatter 的 groups(重复测量)与 x/y 只能二选一')
+                    return _result(_chart_fn('scatter')(title, groups=groups,
+                                                        trend=trend, trend_eq=trend_eq,
+                                                        show_raw=show_raw,
+                                                        highlight=highlight, **common),
+                                   type, style, animate)
                 _require(x is not None and y is not None, 'scatter/bubble 需要 x 与 y')
                 if type == 'bubble':
                     _require(sizes is not None, 'bubble 需要 sizes')
@@ -272,7 +385,9 @@ def make_chart(
                                                        labels=labels, **common),
                                    type, style, animate)
                 return _result(_chart_fn('scatter')(title, x, y, trend=trend,
-                                                    labels=labels, **common),
+                                                    trend_eq=trend_eq, labels=labels,
+                                                    xerr=xerr, yerr=yerr,
+                                                    highlight=highlight, **common),
                                type, style, animate)
             if type == 'hist':
                 _require(values is not None, 'hist 需要 values(原始样本)')
@@ -304,11 +419,6 @@ def make_chart(
                          'sankey 需要 links=[[源, 目标, 数值], ...]')
                 return _result(_chart_fn('sankey')(title, links, **common),
                                type, style, animate)
-            if type == 'sankey':
-                _require(links is not None,
-                         'sankey 需要 links=[[源, 目标, 数值], ...]')
-                return _result(_chart_fn('sankey')(title, links, **common),
-                               type, style, animate)
             if type == 'sunburst':
                 _require(hierarchy is not None,
                          'sunburst 需要 hierarchy(两级层级数据,'
@@ -316,15 +426,117 @@ def make_chart(
                 return _result(_chart_fn('sunburst')(title, hierarchy, percent=percent,
                                                      **common),
                                type, style, animate)
+            if type in _MATH_TYPES:
+                return _result(_math_chart(type, title, x=x, y=y, u=u, v=v, z=z,
+                                           curves=curves, rows=rows, cols=cols,
+                                           matrix=matrix, mode=mode, density=density,
+                                           pi_ticks=pi_ticks, fill=fill, arrows=arrows,
+                                           elev=elev, azim=azim, expr=expr,
+                                           xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax,
+                                           samples=samples, points=points,
+                                           points_name=points_name,
+                                           points_fit=points_fit, common=common),
+                               type, style, animate)
             raise ToolError(f'未知图表类型 {type!r},'
                             f'可选:{", ".join(get_args(ChartType))}')
-    except (ValueError, RuntimeError, OSError) as e:  # 中文校验消息 → ToolError
-        raise ToolError(str(e)) from e
+    except ToolError:
+        raise
+    except Exception as e:  # 分类与文案统一在 errors.py;这里只管传输(→ ToolError)
+        raise ToolError(message(e)) from e
+
+
+def _math_chart(type, title, *, x, y, u, v, z, curves, rows, cols, matrix, mode,
+                density, pi_ticks, fill, arrows, elev, azim, expr, xmin, xmax,
+                ymin, ymax, samples, points, points_name, points_fit, common):
+    """math 域内联数据分发(数值序列/矩阵/表达式,列约定见 make_chart description);
+    返回 Path,由调用方包 _result。"""
+    from .graph.charts.math import sample_curves, sample_field, sample_param, sample_vector_field
+    fn = _chart_fn(type)
+    if type == 'funcplot':
+        pts = dict(points=points, points_name=points_name,
+                   points_fit=points_fit) if points is not None else {}
+        if expr:
+            _require(not (x or y or curves), 'funcplot 的 expr 与 x/y/curves 不能同时给')
+            curves = sample_curves(expr, xmin=xmin, xmax=xmax, samples=samples or 400)
+            return fn(title, curves=curves, pi_ticks=pi_ticks, **pts, **common)
+        if curves is not None:
+            return fn(title, curves=curves, pi_ticks=pi_ticks, **pts, **common)
+        _require(x is not None and y is not None,
+                 'funcplot 需要 x 与 y(或 curves=[[名称, x, y], ...],'
+                 '或 expr 表达式 + xmin/xmax)')
+        return fn(title, x, y, pi_ticks=pi_ticks, **pts, **common)
+    if type == 'polar':
+        if expr:
+            _require(not x and not y, 'polar 的 expr 与 x/y 不能同时给')
+            _require(len(expr) == 1, 'polar 表达式模式需要恰好 1 个 r(θ) 表达式')
+            theta, r = sample_curves(
+                expr[0], var='theta',
+                xmin=0.0 if xmin is None else xmin,
+                xmax=2 * math.pi if xmax is None else xmax,
+                samples=samples or 400)[0][1:]
+            return fn(title, theta, r, fill=fill, **common)
+        _require(x is not None and y is not None,
+                 'polar 需要 x(theta,弧度)与 y(r),或 expr 表达式')
+        return fn(title, x, y, fill=fill, **common)
+    if type == 'param':
+        if expr:
+            _require(not x and not y, 'param 的 expr 与 x/y 不能同时给')
+            _require(len(expr) == 2, 'param 表达式模式需要恰好 2 个表达式:x(t) 与 y(t)')
+            xs, ys = sample_param(expr[0], expr[1], tmin=xmin, tmax=xmax,
+                                  samples=samples or 400)
+            return fn(title, xs, ys, arrows=arrows, pi_ticks=pi_ticks, **common)
+        _require(x is not None and y is not None, 'param 需要 x 与 y,或 expr 表达式')
+        return fn(title, x, y, arrows=arrows, pi_ticks=pi_ticks, **common)
+    if type == 'vector':
+        if expr:
+            _require(not (x or y or u or v), 'vector 的 expr 与 x/y/u/v 不能同时给')
+            _require(len(expr) == 2,
+                     'vector 表达式模式需要恰好 2 个表达式:u(x, y) 与 v(x, y)')
+            _require(all(v is not None for v in (xmin, xmax, ymin, ymax)),
+                     'vector 表达式模式需要 xmin/xmax/ymin/ymax 四个范围')
+            gx, gy, gu, gv = sample_vector_field(expr[0], expr[1], xmin=xmin,
+                                                 xmax=xmax, ymin=ymin, ymax=ymax,
+                                                 n=samples or 20)
+            return fn(title, gx, gy, gu, gv, mode=mode, density=density, **common)
+        _require(x is not None and y is not None and u is not None and v is not None,
+                 'vector 需要 x、y、u、v 四个等长数值序列,或 expr 表达式')
+        return fn(title, x, y, u, v, mode=mode, density=density, **common)
+    if type == 'contour':
+        if expr:
+            _require(not (x or y or z or rows), 'contour 的 expr 与数据参数不能同时给')
+            _require(all(v is not None for v in (xmin, xmax, ymin, ymax)),
+                     'contour 表达式模式需要 xmin/xmax/ymin/ymax 四个范围')
+            axs, ays, zs = sample_field(expr[0], xmin=xmin, xmax=xmax, ymin=ymin,
+                                        ymax=ymax, n=samples or 60)
+            return fn(title, axs, ays, zs, pi_ticks=pi_ticks, **common)
+        if rows is not None and cols is not None and matrix is not None:
+            return fn(title, cols, rows, matrix, pi_ticks=pi_ticks, **common)
+        _require(x is not None and y is not None and z is not None,
+                 'contour 需要 x、y、z(长表)或 rows/cols/matrix(矩阵,'
+                 'rows=y 坐标、cols=x 坐标),或 expr 表达式')
+        return fn(title, x, y, z, pi_ticks=pi_ticks, **common)
+    # surface
+    if expr:
+        _require(not (x or y or z or rows), 'surface 的 expr 与数据参数不能同时给')
+        _require(all(v is not None for v in (xmin, xmax, ymin, ymax)),
+                 'surface 表达式模式需要 xmin/xmax/ymin/ymax 四个范围')
+        axs, ays, zs = sample_field(expr[0], xmin=xmin, xmax=xmax, ymin=ymin,
+                                    ymax=ymax, n=samples or 60)
+        return fn(title, axs, ays, zs, elev=elev, azim=azim, **common)
+    if rows is not None and cols is not None and matrix is not None:
+        return fn(title, cols, rows, matrix, elev=elev, azim=azim, **common)
+    _require(x is not None and y is not None and z is not None,
+             'surface 需要 x、y、z(长表)或 rows/cols/matrix(矩阵,'
+             'rows=y 坐标、cols=x 坐标),或 expr 表达式')
+    return fn(title, x, y, z, elev=elev, azim=azim, **common)
 
 
 def _from_file(type, title, file, cat_col, col, sheet, common, *, horizontal, trend,
-               total, stacked, percent, bins, slope) -> str:
-    """file 数据出图:列约定与 CLI --file 一致,数据转换复用 table.py。"""
+               total, stacked, percent, bins, slope, mode='quiver', density=1.0,
+               pi_ticks=False, fill=False, arrows=False, elev=28.0, azim=-60.0,
+               long=False, inline_err=None) -> str:
+    """file 数据出图:列约定与 CLI --file 一致,数据转换复用 table.py;
+    inline_err 为内联 err 参数(bar 单系列误差线,file 多列升级时拒收)。"""
 
     def done(path, type_name: str):
         return _result(path, type_name, common['style'], common['animate'])
@@ -334,22 +546,26 @@ def _from_file(type, title, file, cat_col, col, sheet, common, *, horizontal, tr
         _require(cols, 'file 至少需要 1 列数值')
         if len(cols) >= 2:  # 多数值列自动升级为多系列(与 CLI --file 一致)
             if type == 'bar':
+                _require(inline_err is None,
+                         'bar 的 err 误差线仅支持单系列(多列数值会升级为 '
+                         'bar-multi,误差请用 errs 参数)')
                 return done(_chart_fn('bar-multi')(title, cats, cols, stacked=stacked,
                                                    percent=percent, **common),
                             'bar-multi')
-            # 区间带只对单系列折线有意义:必须摘掉 lower/upper 再调 line-multi,
+            # 区间带 / 误差线只对单系列折线有意义:必须摘掉再调 line-multi,
             # 否则未知关键字 TypeError 裸穿 except(它不在中文转换的异常元组里)
-            if common.get('lower') is not None or common.get('upper') is not None:
-                raise ToolError('区间带 lower/upper 仅支持单系列折线;'
+            strip = ('lower', 'upper', 'err', 'err_style')
+            if any(common.get(k) is not None and k != 'err_style' for k in strip):
+                raise ToolError('区间带 lower/upper 与误差线 err 仅支持单系列折线;'
                                 'file 含多列数值时会升级为多系列折线,'
                                 '请用 col 指定其中 1 列')
-            multi_common = {k: v for k, v in common.items()
-                            if k not in ('lower', 'upper')}
+            multi_common = {k: v for k, v in common.items() if k not in strip}
             return done(_chart_fn('line-multi')(title, cats, cols, **multi_common),
                         'line-multi')
         if type == 'bar':
             return done(_chart_fn('bar')(title, cats, cols[0][1],
-                                         horizontal=horizontal, **common), type)
+                                         horizontal=horizontal, err=inline_err,
+                                         **common), type)
         return done(_chart_fn('line')(title, cats, cols[0][1], name=cols[0][0],
                                       **common), type)
     if type == 'area':
@@ -414,12 +630,57 @@ def _from_file(type, title, file, cat_col, col, sheet, common, *, horizontal, tr
     if type == 'sankey':
         return done(_chart_fn('sankey')(title, file_links(file, sheet), **common),
                     type)
+    if type in _MATH_TYPES:
+        if type == 'funcplot':
+            cols = file_numeric_columns(file, sheet=sheet)
+            _require(len(cols) >= 2, 'funcplot 的 file 需要第 1 列 x + 至少 1 列 y')
+            xs = cols[0][1]
+            if len(cols) == 2:
+                return done(_chart_fn('funcplot')(title, xs, cols[1][1],
+                                                  name=cols[1][0], pi_ticks=pi_ticks,
+                                                  **common), type)
+            cs = [(nm, xs, ys) for nm, ys in cols[1:]]
+            return done(_chart_fn('funcplot')(title, curves=cs, pi_ticks=pi_ticks,
+                                              **common), type)
+        if type == 'polar':
+            cols = file_numeric_columns(file, 2, sheet=sheet)
+            return done(_chart_fn('polar')(title, cols[0][1], cols[1][1], fill=fill,
+                                           **common), type)
+        if type == 'param':
+            cols = file_numeric_columns(file, sheet=sheet)
+            _require(len(cols) in (2, 3),
+                     f'param 的 file 需要 2 列(x、y)或 3 列(t、x、y),'
+                     f'收到 {len(cols)} 列')
+            a, b = ((cols[1][1], cols[2][1]) if len(cols) == 3
+                    else (cols[0][1], cols[1][1]))
+            return done(_chart_fn('param')(title, a, b, arrows=arrows,
+                                           pi_ticks=pi_ticks, **common), type)
+        if type == 'vector':
+            cols = file_numeric_columns(file, 4, sheet=sheet)
+            return done(_chart_fn('vector')(title, cols[0][1], cols[1][1],
+                                            cols[2][1], cols[3][1], mode=mode,
+                                            density=density, **common), type)
+        # contour / surface:矩阵布局(行列名 = 数值坐标)或 long=true 切 3 列长表
+        extra = dict(pi_ticks=pi_ticks) if type == 'contour' else dict(elev=elev, azim=azim)
+        if long:
+            cols = file_numeric_columns(file, 3, sheet=sheet)
+            return done(_chart_fn(type)(title, cols[0][1], cols[1][1], cols[2][1],
+                                        **extra, **common), type)
+        rlabels, col_names, mat = file_matrix(file, cat_col, sheet)
+        try:
+            ys = [parse_float(v, '(行坐标)') for v in rlabels]
+            xs = [parse_float(v, '(列坐标)') for v in col_names]
+        except ValueError as e:
+            raise ToolError(f'矩阵布局的行名/列名需为数值坐标,'
+                            f'x,y,z 长表请传 long=true;{e}') from e
+        return done(_chart_fn(type)(title, xs, ys, mat, **extra, **common), type)
     if type == 'sunburst':
         raise ToolError('sunburst 暂不支持 file 数据(层级数据请用 hierarchy 内联参数)')
     raise ToolError(f'未知图表类型 {type!r},可选:{", ".join(get_args(ChartType))}')
 
 
 def _result(path, chart_type: str, style: str, animated: bool) -> str:
+    """统一返回 JSON:{path(绝对路径,即交付物), file_size, type, style, animated}。"""
     path = Path(path)
     return json.dumps({'path': str(path), 'file_size': path.stat().st_size,
                        'type': chart_type, 'style': style, 'animated': animated},
@@ -440,6 +701,7 @@ def _result(path, chart_type: str, style: str, animated: bool) -> str:
     ),
 )
 def list_themes(preview: bool = False, out_dir: str | None = None) -> str:
+    """列主题工具:纯文本输出,不拉起 matplotlib;preview=true 追加拼版预览图路径。"""
     lines = []
     for pack, members in THEME_PACKS.items():
         lines.append(f'[{pack}]')
@@ -453,6 +715,7 @@ def list_themes(preview: bool = False, out_dir: str | None = None) -> str:
 
 
 def main() -> None:
+    """stdio 入口(pyproject 的 chartmove-mcp 脚本指向这里)。"""
     server.run()  # stdio
 
 

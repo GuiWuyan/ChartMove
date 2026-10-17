@@ -18,6 +18,7 @@ MARKER_CAP = 50         # 折线标记数上限:超过则隔点绘制(markevery)
 
 
 def _style(ax, title: str, th: dict, grid_axis: str | None = None) -> None:
+    """统一坐标轴外观:标题、脊线、网格、刻度按主题着色;grid_axis 覆盖主题默认。"""
     ax.set_title(title, fontsize=20, pad=18, color=th['text'])
     # spines:'box' 四边框,'none' 全去,默认藏顶右
     hide = {'box': (), 'none': ('top', 'right', 'left', 'bottom')}.get(
@@ -88,6 +89,7 @@ def _xticks(ax, cats: list[str], th: dict) -> bool:
 
 
 def _has_spread(vals: list[float]) -> bool:
+    """数据有差异(≥2 个且不全等)才做最大/最小高亮,全等序列高亮无意义。"""
     return len(vals) >= 2 and max(vals) != min(vals)
 
 
@@ -115,6 +117,15 @@ def _vfmt(ax, vals, th: dict, axis: str = 'y') -> None:
     if fmt == 'percent' or (fmt == 'auto' and max(map(abs, vals), default=0) >= 1e4):
         value_axis = ax.xaxis if axis == 'x' else ax.yaxis
         value_axis.set_major_formatter(FuncFormatter(lambda v, _: _nf(v, th)))
+
+
+def _fit_text(ax, k: float, b: float, r2: float, th: dict) -> None:
+    """线性回归方程 + R² 标注(散点趋势线 / funcplot 拟合共用):绘图区内左上角
+    (顶边向下留 4% 空隙,避免与居中长标题相撞;对角线走势的数据左上角天然空),
+    形如 `y = 0.0418x + 0.087    R² = 0.9920`,主题正文色不抢数据主体。"""
+    sign = '+' if b >= 0 else '-'
+    ax.text(0.01, 0.96, f'y = {k:.4g}x {sign} {abs(b):.4g}    R² = {r2:.4f}',
+            transform=ax.transAxes, ha='left', va='top', fontsize=14, color=th['text'])
 
 
 def _note(fig, th: dict) -> None:

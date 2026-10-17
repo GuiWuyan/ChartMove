@@ -22,6 +22,8 @@ from ..validate import _validate, _validate_links, _validate_series
 
 
 def _funnel_draw(title, cats, vals, th):
+    """漏斗绘制闭包:条宽按最大值归一、左右对称居中,右侧标注
+    "类目 数值(逐级转化率)";无坐标轴,y 轴范围从首帧固定。"""
     vmax = max(vals) or 1
 
     def draw(ax, p):
@@ -61,6 +63,8 @@ def funnel(title: str, categories, values, *, style='business', animate=False, f
 
 
 def _gantt_draw(title, tasks, starts, ends, th):
+    """甘特绘制闭包:任务条从起点向右生长,条尾标"开始–结束";
+    有差距时工期最长高亮(hi_max)、最短弱化(hi_min);首任务在顶。"""
     n = len(tasks)
     lo, hi = min(starts), max(ends)
     span = (hi - lo) or 1.0
@@ -106,6 +110,8 @@ def gantt(title: str, tasks, starts, ends, *, style='business', animate=False, f
 
 
 def _dumbbell_draw(title, cats, name_a, va, name_b, vb, th, slope):
+    """哑铃 / 坡度共用绘制闭包:slope=True 纵向坡度图(每类目一条期初→期末斜线,
+    数值分列两轴外侧);否则横向哑铃(灰点期初、主色点期末,连线自期初长到期末)。"""
     n = len(cats)
 
     def draw(ax, p):
@@ -307,6 +313,8 @@ def _sankey_layout(links):
 
 
 def _sankey_draw(title, links, th):
+    """桑基绘制闭包:布局(_sankey_layout)→ 缎带贝塞尔与透明度预计算 → 逐帧绘制;
+    节点条自中心生长,缎带按采样点切片从源向目标生长。"""
     nodes, recs = _sankey_layout(links)
     palette = th['palette']
     # 配色:全部节点取色板(按列内位置轮换,跨列重复靠标签定位),缎带一律继承

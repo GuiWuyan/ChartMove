@@ -7,6 +7,7 @@ from pathlib import Path
 __all__ = [
     'read_table', 'to_float', 'parse_float', 'pick_column', 'file_columns',
     'file_box_groups', 'file_xy', 'file_samples', 'file_matrix', 'file_links',
+    'file_numeric_columns',
 ]
 
 
@@ -117,6 +118,22 @@ def file_matrix(path, cat_col=None, sheet=None) -> tuple[list[str], list[str], l
     return rlabels, cols, matrix
 
 
+def file_numeric_columns(path, count=None, sheet=None) -> list[tuple[str, list[float]]]:
+    """math 域取数:前 count 列(或全部列)均为数值且按行对齐——与 file_xy 的
+    独立剔空不同,这里整行剔除缺失行,保证 x/y(/u/v)逐点对应不串位。"""
+    header, rows = read_table(path, sheet)
+    n = len(header) if count is None else count
+    if len(header) < n:
+        raise ValueError(f'表格需要 {n} 列数值,表头只有 {len(header)} 列')
+    good = [r for r in rows if len(r) >= n and all(c != '' for c in r[:n])]
+    if not good:
+        raise ValueError(f'表格没有完整的 {n} 列数值行(空缺行按整行剔除)')
+    return [(header[j] or f'列{j + 1}',
+             [to_float(r[j], f'(第 {i + 1} 行,列「{header[j]}」)')
+              for i, r in enumerate(good)])
+            for j in range(n)]
+
+
 def file_links(path, sheet=None) -> list[tuple[str, str, float]]:
     """桑基图取数:前 3 列 = 源、目标、数值。"""
     header, rows = read_table(path, sheet)
@@ -131,6 +148,7 @@ def file_links(path, sheet=None) -> list[tuple[str, str, float]]:
 
 
 def _read_csv(path) -> tuple[list[str], list[list[str]]]:
+    """UTF-8(-sig)/GBK 依次试解;剔除全空行,单元格去首尾空白。"""
     raw = Path(path).read_bytes()
     for enc in ('utf-8-sig', 'gbk'):
         try:
@@ -147,6 +165,7 @@ def _read_csv(path) -> tuple[list[str], list[list[str]]]:
 
 
 def _read_excel(path, sheet=None) -> tuple[list[str], list[list[str]]]:
+    """openpyxl 只读模式取活动表(或 sheet 指定表);None 单元格转空串,剔除全空行。"""
     try:
         from openpyxl import load_workbook
     except ImportError as e:  # 延迟导入:纯 CSV 路径不付 openpyxl 的导入成本(包声明为硬依赖)

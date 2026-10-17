@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "30 20 * * 1" # 每周一 20:30 UTC(周二 4:30 北京):全量回归兜底
 
 jobs:
   lint:
@@ -23,12 +25,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest]
-        python-version: ["3.10", "3.13"]
-        include:
-          - os: ubuntu-latest
-            python-version: "3.11"
-          - os: ubuntu-latest
-            python-version: "3.12"
+        python-version: ["3.12", "3.13"]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30 # 渲染型用例挂了不会一直占 runner
     steps:
@@ -43,4 +40,9 @@ jobs:
         env:
           PYTHONIOENCODING: utf-8
       - run: python -c "import chartmove.mcp_server" # MCP 入口可导入
+      # PR 只跑冒烟、main push 与每周一定时跑全量。注意走 PYTEST_ADDOPTS 且值里
+      # 自带单引号:pytest 用 shlex 拆词,"not slow" 不引住会被拆成 -m not + 位置
+      # 参数 slow,pytest 因标记表达式非法秒退(2026-10-14 踩过的坑)
       - run: pytest -q -n auto --dist loadgroup
+        env:
+          PYTEST_ADDOPTS: ${{ github.event_name == 'pull_request' && '-m ''not slow''' || '' }}

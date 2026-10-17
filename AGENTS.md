@@ -1,12 +1,14 @@
 # AGENTS.md — chartmove 调用须知(面向使用本工具出图的 agent)
 
-chartmove 是中文数据图表生成器:24 种图表,15 套主题分属 4 个风格包,输出 PNG / PDF / TIF / GIF / MP4。入口只有两个:CLI 与 MCP Server(stdio)。
+chartmove 是中文数据图表生成器:30 种图表(含 math 科学绘图域:函数图像 / 极坐标曲线 / 参数曲线·相轨线 / 矢量场·流线·方向场 / 等高线 / 3D 曲面),15 套主题分属 4 个风格包,输出 PNG / PDF / TIF / GIF / MP4。入口只有两个:CLI 与 MCP Server(stdio)。
 
 ## 调用方式
 
 - **CLI**:`chartmove <类型> "标题" [数据] [参数]`,如 `chartmove bar "季度产量" Q1=120 Q2=200`;多份 CSV/Excel 各出一张用 `chartmove batch <类型> "通配符或文件..."`(标题模板 `{name}`/`{i}`,默认取文件名);全部参数看 `chartmove --help` 与 `chartmove bar --help`,数据写法与参数表见 README.md
 - **MCP**:工具 `make_chart`(出图)与 `list_themes`(列主题),参数以工具描述为准(英文);数据校验错误以中文 ToolError 返回,按提示改参重试
 - agent 手头有 CSV / Excel 时,`make_chart` 传 `file` 路径直读(优先于内联数据),列约定同 CLI `--file`,不必把整表内联进参数
+- math 域(funcplot/polar/param/vector/contour/surface)的表格**全为数值列**、按行对齐:funcplot 第 1 列 x 其余列 = 各曲线 y,polar 2 列(theta 弧度, r),param 2 列(x, y)或 3 列(t, x, y),vector 4 列(x, y, u, v),contour / surface 默认矩阵布局(首行首列 = 数值坐标)或 `long=true` / `--long` 切 3 列长表(x, y, z);矢量场 stream 模式需要等间距完整网格
+- math 域也接受**表达式入口**(与数据参数互斥):`expr` / 位置参数给表达式字符串(变量 x、y / t / theta,常量 pi/e,numpy 函数白名单),配 `xmin`/`xmax`(二维场加 `ymin`/`ymax`)与 `samples`(点数或每轴点数);如 `chartmove funcplot "正弦" "sin(x)" --xmin -6.28 --xmax 6.28`;违规表达式(导入/属性/连续幂/大指数)报中文错
 - 出图结果 JSON 里的 `path`(绝对路径)即交付物,直接把它交给用户
 - 主题 / 参数拿不准就先跑 `chartmove themes` 或 MCP `list_themes`,不要凭空造参数
 

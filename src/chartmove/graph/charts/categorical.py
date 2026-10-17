@@ -20,55 +20,74 @@ from ..style import (
     _xlim,
     _xticks,
 )
-from ..validate import _validate, _validate_series
+from ..validate import _validate, _validate_err, _validate_series
 
 
-def _bar_draw(title, cats, vals, th, horizontal=False):
+def _bar_draw(title, cats, vals, th, horizontal=False, err=None):
+    """柱状 / 横向条形共用绘制闭包:柱体逐根错峰生长,过半后浮现数值标签;
+    有差距时最大/最小值分别换 hi_max / hi_min 高亮;err 对称误差随柱生长
+    (纵向柱顶 yerr / 横向条末端 xerr),数值标签让位到误差须端点之外。"""
     def draw(ax, p):
         _style(ax, title, th, grid_axis='x' if horizontal else None)
         hs = [v * _stagger(p, i, len(vals)) for i, v in enumerate(vals)]
+        ebar = ([[e * _stagger(p, i, len(vals)) for i, e in enumerate(err)]]
+                if err else None)
+        ecolor = dict(ecolor=th['text'], elinewidth=1.5, capsize=4,
+                      capthick=1.4) if ebar else None
         cols = [th['palette'][0]] * len(vals)
         if _has_spread(vals):
             cols[vals.index(max(vals))] = th['hi_max']
             cols[vals.index(min(vals))] = th['hi_min']
         if horizontal:  # 首条目在顶部,适配排名场景
-            bars = ax.barh(range(len(vals)), hs, height=0.6, color=cols)
+            bars = ax.barh(range(len(vals)), hs, height=0.6, color=cols,
+                           xerr=ebar, error_kw=ecolor)
+            top = (max(v + e for v, e in zip(vals, err)) if err else max(vals))
+            pad = top * 0.012  # 标签起点留出空隙,不压误差线端帽
             for i, b in enumerate(bars):
                 if _stagger(p, i, len(vals)) > 0.5:
-                    ax.text(hs[i], b.get_y() + b.get_height() / 2, _nf(vals[i], th),
+                    tip = hs[i] + (err[i] * _stagger(p, i, len(vals)) if err else 0)
+                    ax.text(tip + pad, b.get_y() + b.get_height() / 2, _nf(vals[i], th),
                             va='center', ha='left', fontsize=14, color=th['text'])
-            ax.set_xlim(0, max(max(vals) * 1.15, 1))
+            ax.set_xlim(0, max(top * 1.15, 1))
             ax.set_yticks(range(len(vals)))
             ax.set_yticklabels(cats)
             ax.invert_yaxis()
             _vfmt(ax, vals, th, axis='x')
         else:
-            bars = ax.bar(range(len(vals)), hs, width=0.6, color=cols)
+            bars = ax.bar(range(len(vals)), hs, width=0.6, color=cols,
+                          yerr=ebar, error_kw=ecolor)
             for i, b in enumerate(bars):
                 if _stagger(p, i, len(vals)) > 0.5:
-                    ax.text(b.get_x() + b.get_width() / 2, hs[i], _nf(vals[i], th),
+                    tip = hs[i] + (err[i] * _stagger(p, i, len(vals)) if err else 0)
+                    ax.text(b.get_x() + b.get_width() / 2, tip, _nf(vals[i], th),
                             ha='center', va='bottom', fontsize=14, color=th['text'])
-            ax.set_ylim(0, max(max(vals) * 1.15, 1))
+            top = (max(v + e for v, e in zip(vals, err)) if err else max(vals))
+            ax.set_ylim(0, max(top * 1.15, 1))
             _vfmt(ax, vals, th)
             _xticks(ax, cats, th)
     return draw
 
 
-def bar(title: str, categories, values, *, style='business', animate=False, fmt=None, loop=False,
-        out: str | None = None, out_dir=None, horizontal=False,
-        figsize=None, dpi=None, numfmt='auto',
+def bar(title: str, categories, values, *, style='business', animate=False, fmt=None,
+        loop=False, out: str | None = None, out_dir=None, horizontal=False,
+        err=None, figsize=None, dpi=None, numfmt='auto',
         note: str | None = None) -> Path:
-    """柱状图(values 需 >=0):最大/最小高亮;horizontal=True 横向条形,animate=True 逐根升起。"""
+    """柱状图(values 需 >=0):最大/最小高亮;horizontal=True 横向条形(误差自动切
+    x 向);err 对称误差(SD/SEM);animate=True 逐根升起。"""
     cats, vals = _validate(categories, values)
     if min(vals) < 0:
         raise ValueError('柱状图 values 需 >=0,含正负增减的数据请用 waterfall')
+    es = _validate_err(vals, err, what='err')
     th = _theme(style, numfmt, note)
-    return _render('bar', title, _bar_draw(title, cats, vals, th, horizontal),
+    return _render('bar', title, _bar_draw(title, cats, vals, th, horizontal, es),
                    animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)
 
 
-def _bar_multi_draw(title, cats, series, th, stacked=False, percent=False):
+def _bar_multi_draw(title, cats, series, th, stacked=False, percent=False, errs=None):
+    """多系列柱绘制闭包:默认分组并列,stacked=True 逐层堆叠;percent=True 先在
+    类目内归一为占比(隐含 stacked),段内标注文字色按底色亮度自适应;
+    errs 与 series 平行的对称误差(仅分组模式),随各系列柱生长。"""
     m, ng = len(series), len(cats)
     if percent:  # 百分比堆积:类目内归一为占比(%),隐含 stacked
         stacked = True
@@ -86,6 +105,10 @@ def _bar_multi_draw(title, cats, series, th, stacked=False, percent=False):
         for si, (nm, vals) in enumerate(series):
             prog = _stagger(p, si, m)
             color = th['palette'][si % len(th['palette'])]
+            e = errs[si] if errs else None
+            ebar = ([[ev * prog for ev in e]] if e else None)
+            ecolor = (dict(ecolor=th['text'], elinewidth=1.3, capsize=3, capthick=1.2)
+                      if ebar else None)
             if stacked:
                 ax.bar(range(ng), [v * prog for v in vals], bottom=bases[si],
                        width=w * 0.92, color=color, label=nm)
@@ -100,12 +123,15 @@ def _bar_multi_draw(title, cats, series, th, stacked=False, percent=False):
                                     path_effects=[Normal()])
             else:
                 ax.bar([i + (si - m / 2 + 0.5) * w for i in range(ng)],
-                       [v * prog for v in vals], width=w * 0.92, color=color, label=nm)
+                       [v * prog for v in vals], width=w * 0.92, color=color,
+                       label=nm, yerr=ebar, error_kw=ecolor)
         if percent:
             ax.set_ylim(0, 100)
             _vfmt(ax, [0, 100], dict(th, numfmt='percent'))  # 刻度追加 %
         else:
-            ceiling = max(acc) if stacked else max(max(v) for _, v in series)
+            tops = [max(v + e for v, e in zip(vals, es)) if es else max(vals)
+                    for (nm, vals), es in zip(series, errs or [None] * m)]
+            ceiling = max(acc) if stacked else max(tops)
             ax.set_ylim(0, max(ceiling * 1.15, 1))
             _vfmt(ax, [v for _, vals in series for v in vals], th)
         _xticks(ax, cats, th)
@@ -115,16 +141,30 @@ def _bar_multi_draw(title, cats, series, th, stacked=False, percent=False):
 
 
 def bar_multi(title: str, categories, series, *, stacked=False, percent=False,
-              style='business', animate=False, fmt=None, loop=False,
+              errs=None, style='business', animate=False, fmt=None, loop=False,
               out: str | None = None, out_dir=None, figsize=None, dpi=None,
               numfmt='auto', note: str | None = None) -> Path:
-    """多系列柱状图:默认分组并列,stacked=True 堆积、percent=True 百分比堆积(隐含 stacked)。"""
+    """多系列柱状图:默认分组并列,stacked=True 堆积、percent=True 百分比堆积
+    (隐含 stacked);errs=[误差列表, ...] 与 series 平行(None 项 = 无误差),
+    仅分组模式支持(堆积段无从锚定误差)。"""
     cats = [str(c) for c in categories]
     ss = _validate_series(cats, series)
     if any(min(vals) < 0 for _, vals in ss):
         raise ValueError('多系列柱状图各系列 values 需 >=0')
+    norm_errs = None
+    if errs is not None:
+        if stacked or percent:
+            raise ValueError('堆积 / 百分比堆积柱状图不支持误差线(堆积段无从锚定误差),'
+                             '请用分组模式(不传 stacked / percent)')
+        if len(errs) != len(ss):
+            raise ValueError(f'errs 需与 series 个数一致(需 {len(ss)} 个,'
+                             f'收到 {len(errs)} 个)')
+        norm_errs = [None if e is None else
+                     _validate_err(vals, e, what=f'系列「{nm}」的 err')
+                     for (nm, vals), e in zip(ss, errs)]
     th = _theme(style, numfmt, note)
-    return _render('bar_multi', title, _bar_multi_draw(title, cats, ss, th, stacked, percent),
+    return _render('bar_multi', title,
+                   _bar_multi_draw(title, cats, ss, th, stacked, percent, norm_errs),
                    animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)
 
@@ -192,6 +232,9 @@ def pareto(title: str, categories, values, *, style='business', animate=False, f
 
 
 def _waterfall_draw(title, cats, vals, th, total=True):
+    """瀑布绘制闭包:正柱从上一累计水平向上生长,负柱顶端挂累计水平向下生长;
+    total=True 末尾补"合计"柱(从 0 画到代数和),相邻柱间画桥线;
+    y 轴按含合计的全部累计水平固定,合计柱长出时轴不动。"""
     bars, acc = [], 0.0  # (label, value 或 None=合计, 起点)
     for c, v in zip(cats, vals):
         bars.append((c, v, acc))

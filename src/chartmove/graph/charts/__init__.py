@@ -1,7 +1,9 @@
-"""图表子包:22 种图按语义域分 5 个模块,模块间禁止互相 import;包级放 themes_preview。"""
+"""图表子包:30 种图按语义域分 6 个模块(categorical 柱类 / composition 占比 /
+distribution 分布关系 / flow 流程进度 / trend 趋势对比 / math 科学绘图),
+模块间禁止互相 import;包级放 themes_preview(主题预览拼版图)。"""
 from __future__ import annotations
 
-import math
+from math import ceil  # 勿用 `import math`:子模块 math.py 导入时会覆盖包命名空间里的这个名字
 from pathlib import Path
 
 from matplotlib import pyplot as plt
@@ -17,7 +19,7 @@ def themes_preview(*, out: str | None = None, out_dir=None, dpi=None) -> Path:
     """主题预览拼版图:全部主题各画一组相同数据的迷你柱状图,一张 PNG 对比选风格。"""
     cats, vals = ['一季度', '二季度', '三季度', '四季度'], [120, 200, 90, 160]
     names = list(THEMES)
-    cols, rows = 4, math.ceil(len(names) / 4)
+    cols, rows = 4, ceil(len(names) / 4)
     fig = plt.figure(figsize=(cols * 4.2, rows * 2.9), facecolor='white')
     for i, name in enumerate(names):
         th = _theme(name)
