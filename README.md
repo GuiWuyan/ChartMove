@@ -139,7 +139,7 @@ stdio 传输,2 个工具;工具描述为英文,校验错误以中文 `ToolError`
 ## 开发环境
 
 ```bash
-py -3.13 -m venv .venv                              # Python >=3.10
+py -3.13 -m venv .venv                              # Python >=3.12
 .venv/Scripts/python.exe -m pip install -e ".[dev]" # 可编辑安装 + pytest/ruff
 .venv/Scripts/python.exe -m pytest -n auto          # 全量约 30 秒
 .venv/Scripts/python.exe -m ruff check src tests examples

@@ -10,12 +10,10 @@ readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Quasar" }]
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 keywords = ["chart", "matplotlib", "chinese", "mcp", "gif", "animation"]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Operating System :: Microsoft :: Windows",
