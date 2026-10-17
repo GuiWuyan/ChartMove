@@ -57,6 +57,7 @@ from chartmove.graph.charts.distribution import (
     _bubble_draw,
     _heatmap_draw,
     _hist_draw,
+    _norm_groups,
     _scatter_draw,
     _violin_draw,
 )
@@ -69,7 +70,7 @@ from chartmove.graph.charts.trend import (
 )
 from chartmove.graph.render import FRAMES, GIF_FPS, _stagger
 from chartmove.graph.style import _nf, _theme
-from chartmove.graph.validate import _downsample, _lttb_indices
+from chartmove.graph.validate import _downsample, _linfit, _lttb_indices, _validate_err
 from chartmove.themes import THEME_DESCS, THEME_LABELS, THEME_PACKS
 
 HAS_FFMPEG = shutil.which('ffmpeg') is not None
@@ -245,16 +246,31 @@ def _stability_draws() -> dict:
     return {
         'bar': lambda: _bar_draw('t', cats, vals, th),
         'line': lambda: _line_draw('t', cats, vals, th),
+        'line_whisker': lambda: _line_draw('t', cats, vals, th,
+                                           band=([v - 10 for v in vals],
+                                                 [v + 10 for v in vals]),
+                                           err_style='whisker'),
+        'bar_err': lambda: _bar_draw('t', cats, vals, th, err=[10, 15, 8, 12]),
         'line_multi': lambda: _line_multi_draw('t', cats, series, th),
+        'line_multi_errs': lambda: _line_multi_draw('t', cats, series, th,
+                                                    errs=[[8, 12, 9, 15], None]),
         'combo': lambda: _combo_draw('t', cats, vals, [80, 140, 100, 180], th, '柱', '线'),
+        'combo_errs': lambda: _combo_draw('t', cats, vals, [80, 140, 100, 180], th,
+                                          '柱', '线', bar_err=[10, 12, 8, 11],
+                                          line_err=[8, 10, 6, 9]),
         'bar_multi': lambda: _bar_multi_draw('t', cats, series, th),
         'bar_multi_stacked': lambda: _bar_multi_draw('t', cats, series, th, stacked=True),
         'scatter': lambda: _scatter_draw('t', xs, ys, th),
+        'scatter_err': lambda: _scatter_draw('t', xs, ys, th,
+                                             yerr=[10, 12, 8, 11, 9, 13]),
         'bubble': lambda: _bubble_draw('t', xs, ys, [10, 40, 5, 25, 35, 15], th),
         'hist': lambda: _hist_draw('t', [68, 72, 70, 75, 77, 80, 82, 85], 8, th),
         'box': lambda: _box_draw('t', [('组A', [3, 5, 4, 6, 7]), ('组B', [8, 9, 7])], th),
         'violin': lambda: _violin_draw('t', [('组A', np.array([3, 5, 4, 6, 7])),
                                              ('组B', np.array([8, 9, 7, 10, 6]))], th),
+        'violin_mean_sd': lambda: _violin_draw('t', [('组A', np.array([3, 5, 4, 6, 7])),
+                                                     ('组B', np.array([8, 9, 7, 10, 6]))],
+                                               th, mean_sd=True),
         'waterfall': lambda: _waterfall_draw('t', cats, vals, th),
         'funnel': lambda: _funnel_draw('t', ['访问', '加购'], [1000, 420], th),
         'pareto': lambda: _pareto_draw('t', cats, vals, th),
@@ -264,8 +280,8 @@ def _stability_draws() -> dict:
 
 
 def test_axes_limits_stable_during_animation():
-    """动画期间坐标轴固定:逐元素出现的图(散点/气泡/箱线/折线等)轴不得随数据扩张滑动。"""
-    fig, axes = plt.subplots(3, 5, figsize=(17, 9))
+    """动画期间坐标轴固定:逐元素出现的图(散点/气泡/箱线/折线/误差线等)轴不得随数据扩张滑动。"""
+    fig, axes = plt.subplots(3, 7, figsize=(23.8, 9))
     try:
         for ax, (name, build) in zip(axes.flat, _stability_draws().items()):
             draw = build()
@@ -323,10 +339,10 @@ def test_lttb_and_downsample():
     cats = [str(i) for i in range(1000)]
     s1 = [float(i) for i in range(1000)]
     s2 = [float(i % 7) for i in range(1000)]
-    c2, (o1, o2) = _downsample(cats, 100, [s1, s2])
+    c2, (o1, o2), _ = _downsample(cats, 100, [s1, s2])
     assert len(c2) == len(o1) == len(o2) <= 300  # 并集 ≤ 各系列保留点之和
     assert c2[0] == '0' and c2[-1] == '999' and o1[-1] == 999.0
-    c3, (o3,) = _downsample(cats[:50], 100, [s1[:50]])  # sample ≥ 点数:原样
+    c3, (o3,), _ = _downsample(cats[:50], 100, [s1[:50]])  # sample ≥ 点数:原样
     assert c3 == cats[:50] and o3 == s1[:50]
 
 
@@ -951,3 +967,239 @@ def test_mp4_missing_ffmpeg(monkeypatch, tmp_path):
     monkeypatch.setattr(render.shutil, 'which', lambda _: None)
     with pytest.raises(RuntimeError, match='ffmpeg'):
         bar('t', CATS, VALS, out_dir=tmp_path, animate=True, fmt='mp4')
+
+
+# ==================== 误差线(error bar)====================
+
+def test_validate_err_rules():
+    """对称误差校验:None 直通、非数值/负值/不等长中文报错。"""
+    assert _validate_err([1, 2], None) is None
+    assert _validate_err([1, 2, 3], [0.1, 0.2, 0.3]) == [0.1, 0.2, 0.3]
+    with pytest.raises(ValueError, match='等长'):
+        _validate_err([1, 2], [0.1])
+    with pytest.raises(ValueError, match='没有负值'):
+        _validate_err([1, 2], [0.1, -0.2])
+    with pytest.raises(ValueError, match='数值列表'):
+        _validate_err([1, 2], [0.1, None])
+    with pytest.raises(ValueError, match='nan'):
+        _validate_err([1, 2], [0.1, float('nan')])
+
+
+def test_linfit_known_line():
+    """线性拟合:斜率/截距/R² 与手算一致;完全共线 R²=1,全相等 y 约定 R²=1。"""
+    k, b, r2 = _linfit([1, 2, 3, 4], [0.5, 1.0, 1.5, 2.0])
+    assert abs(k - 0.5) < 1e-12 and abs(b) < 1e-12 and abs(r2 - 1) < 1e-12
+    k, b, r2 = _linfit([0, 1, 2], [5, 5, 5])
+    assert abs(k) < 1e-12 and abs(b - 5) < 1e-12 and r2 == 1.0
+
+
+def test_line_err_whisker_and_band(tmp_path):
+    """line:err 对称误差 whisker 须状 / band 半透明带(默认)都能出图,动画可渲染。"""
+    kw = dict(categories=CATS, values=VALS, err=[10, 15, 8, 12])
+    path, warns = _render(line, dict(kw, err_style='whisker'), tmp_path)
+    _assert_ok(path, 'png', warns)
+    path, warns = _render(line, kw, tmp_path)  # 默认 band:err 折算成区间带
+    _assert_ok(path, 'png', warns)
+    path, warns = _render(line, dict(kw, err_style='whisker'), tmp_path,
+                          animate=True, fmt='gif')
+    _assert_ok(path, 'gif', warns)
+
+
+def test_line_err_band_still_default(tmp_path):
+    """既有调用不受影响:lower/upper 不带 err_style 仍出半透明带(带模式无误差须 Line2D)。"""
+    fig, ax = plt.subplots()
+    try:
+        th = _theme('business')
+        band = ([v - 10 for v in VALS], [v + 10 for v in VALS])
+        _line_draw('t', CATS, VALS, th, band=band)(ax, 1.0)
+        assert len(ax.collections) >= 1  # fill_between 的 PolyCollection 在
+        ax.clear()
+        _line_draw('t', CATS, VALS, th, band=band, err_style='whisker')(ax, 1.0)
+        # 须模式:cap 线(marker='_')存在,且没有 fill_between 的 PolyCollection 色带
+        assert any(ln.get_marker() == '_' for ln in ax.lines)
+        assert not any(type(c).__name__ == 'PolyCollection' for c in ax.collections)
+    finally:
+        plt.close(fig)
+
+
+def test_line_err_validation():
+    """line:err 与 lower/upper 互斥;err_style 非法值与缺区间数据给中文错。"""
+    with pytest.raises(ValueError, match='只能二选一'):
+        line('t', CATS, VALS, err=[1, 2, 3, 4], lower=[0] * 4, upper=[0] * 4)
+    with pytest.raises(ValueError, match='err_style'):
+        line('t', CATS, VALS, err=[1, 2, 3, 4], err_style='dots')
+    with pytest.raises(ValueError, match='whisker'):
+        line('t', CATS, VALS, err_style='whisker')
+    with pytest.raises(ValueError, match='等长'):
+        line('t', CATS, VALS, err=[1, 2])
+
+
+def test_bar_err_vertical_and_horizontal(tmp_path):
+    """bar:误差线纵向柱顶 / 横向条末端(x 向)出图,轴范围容纳须端点。"""
+    path, warns = _render(bar, dict(SINGLE, err=[10, 15, 8, 12]), tmp_path)
+    _assert_ok(path, 'png', warns)
+    path, warns = _render(bar, dict(SINGLE, err=[10, 15, 8, 12], horizontal=True),
+                          tmp_path)
+    _assert_ok(path, 'png', warns)
+    fig, ax = plt.subplots()
+    try:
+        _bar_draw('t', CATS, VALS, _theme('business'), err=[10, 15, 8, 12])(ax, 1.0)
+        assert ax.get_ylim()[1] >= max(v + e for v, e in zip(VALS, [10, 15, 8, 12]))
+    finally:
+        plt.close(fig)
+
+
+def test_bar_multi_errs_and_stacked_reject(tmp_path):
+    """bar-multi:分组模式逐系列误差(None 占位跳过);堆积/百分比给中文错。"""
+    path, warns = _render(bar_multi, dict(categories=CATS, series=SERIES,
+                                          errs=[[8, 12, 9, 15], None]), tmp_path)
+    _assert_ok(path, 'png', warns)
+    with pytest.raises(ValueError, match='堆积'):
+        bar_multi('t', CATS, SERIES, stacked=True, errs=[[8, 12, 9, 15], [6, 9, 11, 7]])
+    with pytest.raises(ValueError, match='堆积'):
+        bar_multi('t', CATS, SERIES, percent=True, errs=[[8, 12, 9, 15], [6, 9, 11, 7]])
+    with pytest.raises(ValueError, match='个数一致'):
+        bar_multi('t', CATS, SERIES, errs=[[8, 12, 9, 15]])
+
+
+def test_line_multi_errs(tmp_path):
+    """line-multi:errs 与 series 平行,None 跳过;长度不符中文错。"""
+    path, warns = _render(line_multi, dict(categories=CATS, series=SERIES,
+                                           errs=[[8, 12, 9, 15], None]), tmp_path)
+    _assert_ok(path, 'png', warns)
+    with pytest.raises(ValueError, match='个数一致'):
+        line_multi('t', CATS, SERIES, errs=[[8, 12, 9, 15]])
+
+
+def test_combo_errs(tmp_path):
+    """combo:柱误差随柱生长、线误差随折线延伸;负误差给中文错。"""
+    path, warns = _render(combo, dict(categories=CATS, bar_values=VALS,
+                                      line_values=[80, 140, 100, 180],
+                                      bar_err=[10, 12, 8, 11],
+                                      line_err=[8, 10, 6, 9]), tmp_path)
+    _assert_ok(path, 'png', warns)
+    with pytest.raises(ValueError, match='bar_err'):
+        combo('t', CATS, VALS, [80, 140, 100, 180], bar_err=[-1, 0, 0, 0])
+
+
+def test_error_bar_scatter(tmp_path):
+    """scatter:xerr/yerr 双向误差 + trend_eq 方程与 R² 标注(文本含 y = 与 R²)。"""
+    path, warns = _render(scatter, dict(xs=XS, ys=YS, yerr=[10, 12, 8, 11, 9, 13],
+                                        xerr=[0.2] * 6, trend=True, trend_eq=True),
+                          tmp_path)
+    _assert_ok(path, 'png', warns)
+    fig, ax = plt.subplots()
+    try:
+        _scatter_draw('t', XS, YS, _theme('business'), trend=True,
+                      trend_eq=True)(ax, 1.0)
+        texts = [t.get_text() for t in ax.texts]
+        assert any('R²' in t and 'y =' in t for t in texts), texts
+    finally:
+        plt.close(fig)
+
+
+def test_scatter_groups_replicates(tmp_path):
+    """scatter 重复测量:groups 聚合均值±SD(ddof=1)、show_raw 空心点、图例「单次读数」。"""
+    xs, means, sds, raw = _norm_groups([[0, [1, 2, 3]], [4, [5, 7]], [8, [9]]])
+    assert xs == [0.0, 4.0, 8.0]
+    assert means == [2.0, 6.0, 9.0]
+    assert abs(sds[0] - 1.0) < 1e-12 and abs(sds[1] - 2 ** 0.5) < 1e-12 and sds[2] == 0.0
+    assert raw == [(0.0, 1.0), (0.0, 2.0), (0.0, 3.0), (4.0, 5.0), (4.0, 7.0), (8.0, 9.0)]
+    path, warns = _render(scatter, dict(groups=[[0, [0.02, 0.03]], [4, [0.25, 0.28, 0.22]],
+                                                [8, [0.45, 0.5]]],
+                                        show_raw=True, trend=True, trend_eq=True),
+                          tmp_path)
+    _assert_ok(path, 'png', warns)
+    fig, ax = plt.subplots()
+    try:
+        draw = _scatter_draw('t', xs, means, _theme('business'),
+                             name='均值 ± SD', yerr=sds, raw=raw)
+        draw(ax, 1.0)
+        legend = ax.get_legend()
+        assert any('单次读数' in t.get_text() for t in legend.get_texts())
+    finally:
+        plt.close(fig)
+
+
+def test_scatter_groups_validation():
+    """scatter:groups 与 x/y 互斥;show_raw 需要 groups;空组与非数值给中文错。"""
+    with pytest.raises(ValueError, match='二选一'):
+        scatter('t', [1, 2], [3, 4], groups=[[1, [1, 2]]])
+    with pytest.raises(ValueError, match='show_raw'):
+        scatter('t', [1, 2], [3, 4], show_raw=True)
+    with pytest.raises(ValueError, match='重复读数'):
+        scatter('t', groups=[[1, [1, 2]], [2, []]])
+    with pytest.raises(ValueError, match='groups'):
+        scatter('t', groups=[['x', 'not-a-list']])
+    with pytest.raises(ValueError, match='等长'):
+        scatter('t', [1, 2], [3, 4], yerr=[1, 2, 3])
+
+
+def test_scatter_highlight_switch():
+    """scatter 高亮开关:xy 模式默认图例含最好/最差;highlight=False 双双消失。"""
+    th = _theme('business')
+    fig, ax = plt.subplots()
+    try:
+        _scatter_draw('t', XS, YS, th)(ax, 1.0)
+        texts = [t.get_text() for t in ax.get_legend().get_texts()]
+        assert '最好' in texts and '最差' in texts
+    finally:
+        plt.close(fig)
+    fig, ax = plt.subplots()
+    try:
+        _scatter_draw('t', XS, YS, th, highlight=False)(ax, 1.0)
+        texts = [t.get_text() for t in ax.get_legend().get_texts()]
+        assert '最好' not in texts and '最差' not in texts
+    finally:
+        plt.close(fig)
+
+
+def test_scatter_groups_highlight_auto_off(tmp_path):
+    """groups 模式 highlight=None 自动关闭:渲染产物不再有高亮大点(图例无最好/最差);
+    显式 highlight=True 可开回。"""
+    path, warns = _render(scatter, dict(groups=[[0, [0.02, 0.05]], [4, [0.25, 0.3]],
+                                                [8, [0.45, 0.5]]],
+                                        show_raw=True, trend=True, trend_eq=True),
+                          tmp_path)
+    _assert_ok(path, 'png', warns)
+    fig, ax = plt.subplots()
+    try:
+        _, means, sds, raw = _norm_groups([[0, [0.02, 0.05]], [4, [0.25, 0.3]],
+                                           [8, [0.45, 0.5]]])
+        _scatter_draw('t', [0, 4, 8], means, _theme('business'), name='均值 ± SD',
+                      yerr=sds, raw=raw, highlight=False)(ax, 1.0)
+        texts = [t.get_text() for t in ax.get_legend().get_texts()]
+        assert '最好' not in texts and '最差' not in texts
+    finally:
+        plt.close(fig)
+
+
+def test_violin_mean_sd(tmp_path):
+    """violin:mean_sd=True 叠加均值菱形 + ±SD 须(误差线容器存在)。"""
+    path, warns = _render(violin, dict(series=[('组A', [3, 5, 4, 6, 7, 5, 4]),
+                                               ('组B', [8, 9, 7, 10, 6, 9, 8])],
+                                       mean_sd=True), tmp_path)
+    _assert_ok(path, 'png', warns)
+    fig, ax = plt.subplots()
+    try:
+        draw = _violin_draw('t', [('组A', np.array([3.0, 5.0, 4.0, 6.0, 7.0])),
+                                  ('组B', np.array([8.0, 9.0, 7.0, 10.0, 6.0]))],
+                            _theme('business'), mean_sd=True)
+        draw(ax, 1.0)
+        assert len(ax.lines) >= 2  # 每组的 IQR 线恒在;均值须挂在 errorbar 容器里
+        assert ax.containers, '均值±SD 误差线容器缺失'
+    finally:
+        plt.close(fig)
+
+
+def test_error_bar_line_scatter_animated(tmp_path):
+    """误差线动画冒烟:whisker 折线与 groups 散点各出一张 GIF。"""
+    path, warns = _render(line, dict(categories=CATS, values=VALS,
+                                     err=[10, 15, 8, 12], err_style='whisker'),
+                          tmp_path, animate=True, fmt='gif')
+    _assert_ok(path, 'gif', warns)
+    path, warns = _render(scatter, dict(groups=[[0, [1.0, 1.2]], [2, [2.1, 2.0]],
+                                                [4, [3.2, 3.0]]],
+                                        show_raw=True, trend=True),
+                          tmp_path, animate=True, fmt='gif')
+    _assert_ok(path, 'gif', warns)

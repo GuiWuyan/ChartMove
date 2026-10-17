@@ -600,3 +600,44 @@ def test_same_name_not_overwritten(tmp_path):
     assert p1 != p2 and Path(p1).exists() and Path(p2).exists()
     assert p2.removesuffix('.png').endswith('_2')
     Path(p1).unlink(), Path(p2).unlink()
+
+
+def test_make_chart_error_bars(tmp_path):
+    """误差线参数面:line err/err_style、bar err、combo bar_err/line_err、
+    scatter xerr/yerr/trend_eq、scatter groups、violin mean_sd、funcplot points。"""
+    cases = [
+        {'type': 'line', 'title': '须状', 'categories': ['a', 'b', 'c'],
+         'values': [1, 2, 3], 'err': [0.2, 0.3, 0.25], 'err_style': 'whisker'},
+        {'type': 'bar', 'title': '柱误差', 'categories': ['a', 'b'],
+         'values': [10, 20], 'err': [1, 2]},
+        {'type': 'combo', 'title': '组合误差', 'categories': ['a', 'b'],
+         'values': [10, 20], 'line_values': [5, 8],
+         'bar_err': [1, 2], 'line_err': [0.5, 0.5]},
+        {'type': 'scatter', 'title': '误差散点', 'x': [1, 2, 3], 'y': [1.1, 2.0, 2.9],
+         'yerr': [0.1, 0.2, 0.15], 'trend': True, 'trend_eq': True},
+        {'type': 'scatter', 'title': '重复测量', 'groups': [[0, [0.02, 0.03]],
+                                                           [4, [0.25, 0.28, 0.22]]],
+         'show_raw': True, 'trend': True},
+        {'type': 'violin', 'title': '均值SD',
+         'series': [['g1', [1, 2, 3, 4]], ['g2', [2, 3, 4, 5]]], 'mean_sd': True},
+        {'type': 'funcplot', 'title': '实验点', 'x': [0, 4, 8, 12],
+         'y': [0.09, 0.26, 0.42, 0.59],
+         'points': [[1, 0.12, 0.02], [4, 0.26, 0.03]], 'points_fit': True},
+    ]
+    for case in cases:
+        _, result = _call(dict(case, out_dir=str(tmp_path)))
+        assert not result.is_error, (case['type'], result.content[0].text)
+        p = Path(json.loads(result.content[0].text)['path'])
+        assert p.exists() and p.stat().st_size > 0
+        p.unlink()
+
+
+def test_make_chart_error_bar_rejections(tmp_path):
+    """误差线误用:scatter groups 与 x/y 互斥;bar-multi 堆积 + errs 给中文 ToolError。"""
+    _, result = _call({'type': 'scatter', 'title': 't', 'x': [1, 2], 'y': [3, 4],
+                       'groups': [[1, [1, 2]]], 'out_dir': str(tmp_path)})
+    assert result.is_error and '二选一' in result.content[0].text
+    _, result = _call({'type': 'bar-multi', 'title': 't', 'categories': ['a', 'b'],
+                       'series': [['s1', [1, 2]]], 'stacked': True,
+                       'errs': [[1, 2]], 'out_dir': str(tmp_path)})
+    assert result.is_error and '堆积' in result.content[0].text

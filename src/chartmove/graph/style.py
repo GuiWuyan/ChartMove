@@ -119,6 +119,15 @@ def _vfmt(ax, vals, th: dict, axis: str = 'y') -> None:
         value_axis.set_major_formatter(FuncFormatter(lambda v, _: _nf(v, th)))
 
 
+def _fit_text(ax, k: float, b: float, r2: float, th: dict) -> None:
+    """线性回归方程 + R² 标注(散点趋势线 / funcplot 拟合共用):绘图区内左上角
+    (顶边向下留 4% 空隙,避免与居中长标题相撞;对角线走势的数据左上角天然空),
+    形如 `y = 0.0418x + 0.087    R² = 0.9920`,主题正文色不抢数据主体。"""
+    sign = '+' if b >= 0 else '-'
+    ax.text(0.01, 0.96, f'y = {k:.4g}x {sign} {abs(b):.4g}    R² = {r2:.4f}',
+            transform=ax.transAxes, ha='left', va='top', fontsize=14, color=th['text'])
+
+
 def _note(fig, th: dict) -> None:
     """底部左侧脚注(数据来源 / 备注):正文色 55% 透明度,各主题下都退居次要。"""
     note = th.get('note')

@@ -1,4 +1,4 @@
-"""一条命令生成全部类型示例图(24 类型 + 堆积变体,共 27 张),兼任用法文档。
+"""一条命令生成全部类型示例图(30 类型 + 堆积变体 + 误差线变体,共 42 张),兼任用法文档。
 
     python examples/make_all.py [--animate] [--out-dir D:/tmp/charts]
 默认输出到项目根 ./Results/(按本脚本位置定位,与运行时工作目录无关)。
@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 
 from chartmove import (
@@ -16,22 +17,28 @@ from chartmove import (
     box,
     bubble,
     combo,
+    contour,
     donut,
     dumbbell,
+    funcplot,
     funnel,
     gantt,
     heatmap,
     hist,
     line,
     line_multi,
+    param,
     pareto,
     pie,
+    polar,
     radar,
     rose,
     sankey,
     scatter,
     sunburst,
+    surface,
     treemap,
+    vector,
     violin,
     waterfall,
 )
@@ -47,9 +54,42 @@ XS = [1, 2, 3, 4, 5, 6, 7, 8]
 YS = [86, 92, 78, 105, 96, 118, 90, 110]
 MATRIX = [[3, 7, 2, 5], [8, 1, 6, 4], [2, 5, 9, 3], [6, 2, 4, 8]]
 
+# math 域示例数据(纯 stdlib 构造,避免 make_all 依赖 numpy)
+MATH_XS = [i * 0.25 for i in range(33)]                     # 0 ~ 8
+MATH_SIN = [math.sin(x) for x in MATH_XS]
+MATH_DAMP = [math.exp(-0.25 * x) * math.sin(2 * x) for x in MATH_XS]
+MATH_THETA = [i * 2 * math.pi / 120 for i in range(121)]
+MATH_ROSE = [abs(math.sin(1.5 * t)) for t in MATH_THETA]     # 三瓣
+MATH_TS = [i * 2 * math.pi / 100 for i in range(101)]
+MATH_LX = [math.sin(3 * t) for t in MATH_TS]                 # 利萨如
+MATH_LY = [math.sin(4 * t) for t in MATH_TS]
+MATH_GRID = [i * 0.5 - 2 for i in range(9)]                  # -2 ~ 2
+MATH_FX: list[float] = []
+MATH_FY: list[float] = []
+MATH_FU: list[float] = []
+MATH_FV: list[float] = []
+for _gy in MATH_GRID:
+    for _gx in MATH_GRID:
+        MATH_FX.append(_gx)
+        MATH_FY.append(_gy)
+        MATH_FU.append(-_gy)                                 # 辐旋场
+        MATH_FV.append(_gx)
+MATH_SX = [i * 0.25 - 2 for i in range(17)]                  # 曲面网格
+MATH_SY = [i * 0.25 - 2 for i in range(17)]
+MATH_SZ = [[math.sin(sx) * math.cos(sy) for sx in MATH_SX] for sy in MATH_SY]
+
+# 误差线示例数据:重复测量(标准曲线)与各组对称误差
+REPL_GROUPS = [[0, [0.021, 0.018, 0.025, 0.019, 0.023, 0.02, 0.022]],
+               [4, [0.232, 0.255, 0.218, 0.245, 0.262, 0.15, 0.285]],
+               [8, [0.462, 0.485, 0.505, 0.415, 0.375, 0.44, 0.49]],
+               [12, [0.585, 0.61, 0.595, 0.655, 0.625, 0.52, 0.58]],
+               [16, [0.735, 0.75, 0.715, 0.785, 0.69, 0.77, 0.745]],
+               [20, [0.925, 0.995, 0.885, 0.9, 0.825, 0.955, 0.985]]]
+
 
 def make_all(out_dir=None, animate=False) -> list:
-    """依次生成 24 种类型 + 3 张堆积变体,主题按序轮换,顺带展示 15 套风格。"""
+    """依次生成 30 种类型 + 3 张堆积变体 + 9 张误差线变体,主题按序轮换,
+    顺带展示 15 套风格。"""
     styles = list(THEMES)
 
     def at(i):
@@ -121,6 +161,46 @@ def make_all(out_dir=None, animate=False) -> list:
                                 ['副业', '储蓄', 1500], ['储蓄', '基金定投', 2600],
                                 ['储蓄', '应急备用金', 2100]],
                style=at(26), animate=animate, out_dir=out_dir),
+        funcplot('正弦与阻尼振荡', curves=[('正弦', MATH_XS, MATH_SIN),
+                                          ('阻尼振荡', MATH_XS, MATH_DAMP)],
+                 pi_ticks=True, style=at(27), animate=animate, out_dir=out_dir),
+        polar('三瓣玫瑰', MATH_THETA, MATH_ROSE, fill=True, style=at(28),
+              animate=animate, out_dir=out_dir),
+        param('利萨如轨迹', MATH_LX, MATH_LY, arrows=True, style=at(29),
+              animate=animate, out_dir=out_dir),
+        vector('辐旋流场', MATH_FX, MATH_FY, MATH_FU, MATH_FV, mode='stream',
+               style=at(30), animate=animate, out_dir=out_dir),
+        contour('波场等高线', MATH_SX, MATH_SY, MATH_SZ, style=at(31),
+                animate=animate, out_dir=out_dir),
+        surface('波场曲面', MATH_SX, MATH_SY, MATH_SZ, style=at(32),
+                animate=animate, out_dir=out_dir),
+        # ---- 误差线变体(8 张)----
+        line('销量均值误差线', MONTHS, [95, 130, 112, 178], err=[12, 18, 9, 15],
+             err_style='whisker', style=at(1), animate=animate, out_dir=out_dir),
+        bar('季度产量SD', CATS, VALS, err=[15, 20, 12, 18], style=at(0),
+            animate=animate, out_dir=out_dir),
+        bar('渠道销量SD横条', ['线上', '门店', '批发', '直供'], [320, 210, 150, 90],
+            err=[25, 18, 12, 8], horizontal=True, style=at(4),
+            animate=animate, out_dir=out_dir),
+        line_multi('双系列误差折线', MONTHS,
+                   [('销售额', [120, 200, 150, 260]), ('成本', [90, 118, 125, 110])],
+                   errs=[[10, 14, 8, 16], [6, 8, 5, 7]],
+                   style=at(7), animate=animate, out_dir=out_dir),
+        bar_multi('分组销量SD', CATS, SERIES, errs=[[8, 12, 9, 15], [6, 9, 11, 7]],
+                  style=at(8), animate=animate, out_dir=out_dir),
+        combo('销量客单价SD', CATS, VALS, [86, 80, 78, 105], bar_err=[12, 15, 9, 14],
+              line_err=[4, 5, 3, 6], style=at(6), animate=animate, out_dir=out_dir),
+        scatter('蛋白标准曲线', groups=REPL_GROUPS, trend=True, trend_eq=True,
+                show_raw=True, style=at(12), animate=animate, out_dir=out_dir),
+        violin('响应时长均值SD', [('新版本', [12, 15, 11, 18, 22, 30, 25, 17, 14, 9]),
+                                  ('旧版本', [21, 25, 19, 28, 32, 40, 35, 27, 24, 19])],
+               mean_sd=True, style=at(25), animate=animate, out_dir=out_dir),
+        funcplot('标准曲线拟合', [i * 0.4 for i in range(51)],
+                 [0.0418 * x + 0.087 for x in [i * 0.4 for i in range(51)]],
+                 points=[[g[0], sum(g[1]) / len(g[1]),
+                          max(g[1]) - min(g[1])] for g in REPL_GROUPS],
+                 points_name='各管均值 ± 极差', points_fit=True, style=at(27),
+                 animate=animate, out_dir=out_dir),
     ]
 
 

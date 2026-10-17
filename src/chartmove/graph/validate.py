@@ -55,6 +55,33 @@ def _validate_band(vals, lower, upper) -> tuple[list[float], list[float]] | None
     return lo, hi
 
 
+def _validate_err(vals, err, *, what: str = 'err') -> list[float] | None:
+    """对称误差(err = ±SD/SEM):None 直通;须与数据等长、有限且 >=0(负误差无意义)。"""
+    if err is None:
+        return None
+    try:
+        es = [float(v) for v in err]
+    except (TypeError, ValueError) as e:
+        raise ValueError(f'{what} 需为数值列表(不能含 null / 非数值项;'
+                         '整系列无误差请在 errs 里用 null 占位)') from e
+    if not es or len(es) != len(vals):
+        raise ValueError(f'{what} 需与数据等长(需 {len(vals)} 个,收到 {len(es)} 个)')
+    _check_finite(es, what)
+    bad = next((i for i, v in enumerate(es) if v < 0), None)
+    if bad is not None:
+        raise ValueError(f'{what} 需 >= 0(误差没有负值,第 {bad + 1} 个为 {es[bad]:g})')
+    return es
+
+
+def _linfit(xs, ys) -> tuple[float, float, float]:
+    """一元线性拟合:返回 (斜率 k, 截距 b, R²);ys 全相等时 R² = 1。"""
+    arr_x, arr_y = np.asarray(xs, dtype=float), np.asarray(ys, dtype=float)
+    k, b = np.polyfit(arr_x, arr_y, 1)
+    ss_res = float(((arr_y - (k * arr_x + b)) ** 2).sum())
+    ss_tot = float(((arr_y - arr_y.mean()) ** 2).sum())
+    return float(k), float(b), 1.0 if ss_tot == 0 else 1.0 - ss_res / ss_tot
+
+
 def _validate_xy(xs, ys) -> tuple[list[float], list[float]]:
     """x/y 均为数值、非空且等长。"""
     x = [float(v) for v in xs]
@@ -190,11 +217,13 @@ def _lttb_indices(ys, target: int) -> list[int]:
     return keep
 
 
-def _downsample(cats: list[str], sample: int | None,
-                series: list[list[float]]) -> tuple[list[str], list[list[float]]]:
-    """多系列 LTTB 降采样:取各系列保留索引并集并同步截取;sample 无效时原样返回。"""
+def _downsample(cats: list[str], sample: int | None, series: list[list[float]],
+                extra: list | None = None) -> tuple[list[str], list[list[float]], list]:
+    """多系列 LTTB 降采样:取各系列保留索引并集并同步截取;extra 与 series 平行的
+    附加列表(如各系列误差,None 项原样跳过)同步截取;sample 无效时原样返回。"""
     n = len(cats)
     if not sample or sample >= n or sample < 3:
-        return cats, series
+        return cats, series, list(extra or [])
     idx = sorted(set().union(*(_lttb_indices(v, sample) for v in series)))
-    return [cats[i] for i in idx], [[v[i] for i in idx] for v in series]
+    return ([cats[i] for i in idx], [[v[i] for i in idx] for v in series],
+            [([e[i] for i in idx] if e is not None else None) for e in (extra or [])])

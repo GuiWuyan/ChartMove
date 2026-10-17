@@ -16,6 +16,7 @@ from functools import partial
 from pathlib import Path
 
 from ._version import __version__
+from .errors import message
 from .table import (
     file_box_groups,
     file_columns,
@@ -193,31 +194,40 @@ def _one_col(cols, t):
 # ---------- 各类型的运行逻辑 ----------
 
 def _run_bar(kind, args):
-    """bar:--file 多数值列自动升级 bar-multi;单列按 --horizontal 出柱状/条形。"""
+    """bar:--file 多数值列自动升级 bar-multi;单列按 --horizontal 出柱状/条形;
+    --err 对称误差仅单系列(多列请用 bar-multi 的 --errs)。"""
     fn = _chart_fn(kind)
     kw = _common_kwargs(args)
+    err = _num_list(args.err) if args.err else None
     if args.file:
         cats, cols = _file_cols(args)
         if len(cols) >= 2:  # 多数值列自动升级为分组柱状图
+            if err:
+                raise ValueError('误差线 --err 仅支持单系列柱状图;'
+                                 '多数值列会升级为 bar-multi,误差请用 --errs')
             return _chart_fn('bar-multi')(args.title, cats, cols, **kw)
         _one_col(cols, 'bar')
-        return fn(args.title, cats, cols[0][1], horizontal=args.horizontal, **kw)
+        return fn(args.title, cats, cols[0][1], horizontal=args.horizontal,
+                  err=err, **kw)
     cats, vals = _pairs_or_json(args)
-    return fn(args.title, cats, vals, horizontal=args.horizontal, **kw)
+    return fn(args.title, cats, vals, horizontal=args.horizontal, err=err, **kw)
 
 
 def _run_line(kind, args):
-    """line:--file 多数值列自动升级 line-multi;区间带 --lower/--upper 仅单系列;
-    图例名取列表头(内联数据用默认名)。"""
+    """line:--file 多数值列自动升级 line-multi;区间带 --lower/--upper 与对称
+    误差 --err 仅单系列;图例名取列表头(内联数据用默认名)。"""
     fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     band = {'lower': _num_list(args.lower) if args.lower else None,
-            'upper': _num_list(args.upper) if args.upper else None}
+            'upper': _num_list(args.upper) if args.upper else None,
+            'err': _num_list(args.err) if args.err else None,
+            'err_style': args.err_style}
     if args.file:
         cats, cols = _file_cols(args)
         if len(cols) >= 2:  # 多数值列自动升级为多系列折线
-            if any(band.values()):
-                raise ValueError('区间带 --lower/--upper 仅支持单系列折线')
+            if any(v is not None for v in (band['lower'], band['upper'], band['err'])):
+                raise ValueError('区间带 --lower/--upper 与误差线 --err '
+                                 '仅支持单系列折线')
             return _chart_fn('line-multi')(args.title, cats, cols,
                                            **_sample_kw(args), **kw)
         _one_col(cols, 'line')
@@ -254,12 +264,15 @@ def _run_combo(kind, args):
         cats, bvals = _pairs_or_json(args)
         lvals = _num_list(args.line)
     return fn(args.title, cats, bvals, lvals, bar_name=args.bar_name,
-              line_name=args.line_name, **kw)
+              line_name=args.line_name,
+              bar_err=_num_list(args.bar_err) if args.bar_err else None,
+              line_err=_num_list(args.line_err) if args.line_err else None, **kw)
 
 
 def _run_multi(kind, args):
     """line-multi / bar-multi / radar 共用:--file 各数值列 = 一个系列,
-    或 --categories + --series JSON;--no-value-labels 仅折线有效。"""
+    或 --categories + --series JSON;--no-value-labels 仅折线有效;
+    --errs 各系列对称误差 JSON(line-multi / bar-multi)。"""
     fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     if args.file:
@@ -269,6 +282,8 @@ def _run_multi(kind, args):
         cats, ss = _series_or_json(args)
     vkw = {'value_labels': False} if getattr(args, 'no_value_labels', False) else {}
     extra = {'stacked': args.stacked, 'percent': args.percent} if kind == 'bar-multi' else {}
+    if kind in ('line-multi', 'bar-multi') and getattr(args, 'errs', None):
+        extra['errs'] = _load_json(args.errs)
     return fn(args.title, cats, ss, **vkw, **extra, **_sample_kw(args), **kw)
 
 
@@ -306,21 +321,35 @@ def _run_sunburst(kind, args):
 
 
 def _run_samples(kind, args):
-    """box / violin 共用:series=[(组名, 原始样本), ...],--series JSON 或 --file 每列一组。"""
+    """box / violin 共用:series=[(组名, 原始样本), ...],--series JSON 或 --file 每列一组;
+    violin 的 --mean-sd 组内叠加均值±SD。"""
     fn = _chart_fn(kind)
     kw = _common_kwargs(args)
+    extra = {'mean_sd': args.mean_sd} if kind == 'violin' else {}
     if args.file:  # 每列一组,首行表头=组名,单元格为原始样本
-        return fn(args.title, file_box_groups(args.file, getattr(args, 'sheet', None)), **kw)
+        return fn(args.title, file_box_groups(args.file, getattr(args, 'sheet', None)),
+                  **extra, **kw)
     if not args.series:
         raise ValueError(f'{kind} 需要 --series(JSON)或 --file(CSV/Excel,每列一组)')
-    return fn(args.title, _norm_series(_load_json(args.series)), **kw)
+    return fn(args.title, _norm_series(_load_json(args.series)), **extra, **kw)
 
 
 def _run_xy(kind, args):
     """scatter / bubble 共用(args.type 区分):--file 列序 x, y(, sizes)(, labels),
-    或 --x/--y(--labels/--sizes);--trend 仅散点有效。"""
+    或 --x/--y(--labels/--sizes);--trend 仅散点有效;scatter 的误差线/重复测量
+    走 --xerr/--yerr/--groups/--show-raw/--trend-eq(内联或 --data JSON)。"""
     fn = _chart_fn(kind)
     kw = _common_kwargs(args)
+    d = _load_json(args.data) if args.data else {}
+    # --no-highlight:关掉商务风的"最好/最差"高亮;未给时 None 走自动(groups 默认关)
+    sci = {'highlight': False if getattr(args, 'no_highlight', False) else None}
+    if args.type == 'scatter':
+        groups = _load_json(args.groups) if getattr(args, 'groups', None) else d.get('groups')
+        if groups is not None:
+            return fn(args.title, groups=groups, trend=args.trend,
+                      trend_eq=bool(getattr(args, 'trend_eq', False) or d.get('trend_eq')),
+                      show_raw=bool(getattr(args, 'show_raw', False) or d.get('show_raw')),
+                      highlight=sci['highlight'], **kw)
     if args.file:  # 列顺序:x, y(, sizes)(, labels)
         xs, ys, sizes, labels = file_xy(args.file, sizes=args.type == 'bubble',
                                         sheet=getattr(args, 'sheet', None))
@@ -328,19 +357,24 @@ def _run_xy(kind, args):
             if not sizes:
                 raise ValueError('bubble 的 --file 需要第 3 列气泡大小')
             return fn(args.title, xs, ys, sizes, labels=labels, **kw)
-        return fn(args.title, xs, ys, trend=args.trend, labels=labels, **kw)
-    d = _load_json(args.data) if args.data else {}
+        return fn(args.title, xs, ys, trend=args.trend, labels=labels,
+                  highlight=sci['highlight'], **kw)
     xs = _num_list(args.x) if args.x else d.get('xs')
     ys = _num_list(args.y) if args.y else d.get('ys')
     if not xs or not ys:
-        raise ValueError('请用 --x/--y、--file 提供数据,或用 --data 传 {"xs": [...], "ys": [...]}')
+        raise ValueError('请用 --x/--y、--file 提供数据,或用 --data 传 '
+                         '{"xs": [...], "ys": [...]}(scatter 也可用 --groups 传重复测量)')
     labels = _str_list(args.labels) if args.labels else d.get('labels')
     if args.type == 'bubble':
         sizes = _num_list(args.sizes) if args.sizes else d.get('sizes')
         if not sizes:
             raise ValueError('bubble 需要 --sizes / --file 第 3 列,或 --data 传 sizes 字段')
         return fn(args.title, xs, ys, sizes, labels=labels, **kw)
-    return fn(args.title, xs, ys, trend=args.trend, labels=labels, **kw)
+    return fn(args.title, xs, ys, trend=args.trend, labels=labels,
+              xerr=_num_list(args.xerr) if args.xerr else d.get('xerr'),
+              yerr=_num_list(args.yerr) if args.yerr else d.get('yerr'),
+              trend_eq=bool(getattr(args, 'trend_eq', False) or d.get('trend_eq')),
+              highlight=sci['highlight'], **kw)
 
 
 def _bins(text: str):
@@ -450,10 +484,13 @@ def _run_sankey(kind, args):
 
 def _run_funcplot(kind, args):
     """funcplot:--file 第 1 列 x、其余列 = 各曲线 y(列表头 = 曲线名,多列自动多曲线),
-    或 --x/--y 内联,或 --data(curves 或 x/y 字段)。"""
+    或 --x/--y 内联,或 --data(curves 或 x/y 字段);--points 实测点 JSON 叠加。"""
     fn = _chart_fn(kind)
     kw = _common_kwargs(args)
     extra = dict(pi_ticks=args.pi_ticks, equal=args.equal, sample=args.sample or None)
+    if getattr(args, 'points', None):
+        extra.update(points=_load_json(args.points), points_fit=args.points_fit,
+                     points_name=args.points_name)
     if args.exprs:
         _expr_conflicts(args)
         xmin, xmax, _, _ = _expr_ranges(args)
@@ -473,6 +510,10 @@ def _run_funcplot(kind, args):
     d = _load_json(args.data) if args.data else {}
     if 'curves' in d:
         return fn(args.title, curves=d['curves'], **extra, **kw)
+    if 'points' in d and 'points' not in extra:
+        extra['points'] = d['points']
+        extra.setdefault('points_fit', bool(d.get('points_fit')))
+        extra.setdefault('points_name', d.get('points_name') or '实测点')
     xs = _num_list(args.x) if args.x else d.get('x')
     ys = _num_list(args.y) if args.y else d.get('y')
     if not xs or not ys:
@@ -729,6 +770,15 @@ def _prep_batch_args(args, kind: str, file: Path, title: str) -> None:
     args.bar_name, args.line_name = '柱状', '折线'
     args.no_value_labels = False
     args.trend = False
+    args.trend_eq = args.show_raw = args.mean_sd = False
+    args.no_highlight = False
+    args.err = args.errs = None
+    args.err_style = 'band'
+    args.xerr = args.yerr = args.groups = None
+    args.bar_err = args.line_err = None
+    args.points = None
+    args.points_fit = False
+    args.points_name = '实测点'
     args.bins = '10'
     args.no_annotate = False
     args.sample = None
@@ -876,6 +926,19 @@ def _build_parser() -> argparse.ArgumentParser:
         sps[name].add_argument('--y', help='y 数值,逗号分隔')
         sps[name].add_argument('--labels', help='逐点标注,逗号分隔')
     sps['scatter'].add_argument('--trend', action='store_true', help='叠加线性趋势线')
+    sps['scatter'].add_argument('--trend-eq', action='store_true',
+                                help='趋势线旁标注回归方程与 R²(配 --trend)')
+    sps['scatter'].add_argument('--xerr', help='x 方向对称误差,逗号分隔')
+    sps['scatter'].add_argument('--yerr', help='y 方向对称误差,逗号分隔')
+    sps['scatter'].add_argument('--groups',
+                                help='重复测量 JSON:[[x, [读数...]], ...]'
+                                     '(逐组聚合均值±SD,与 --x/--y 互斥)')
+    sps['scatter'].add_argument('--show-raw', action='store_true',
+                                help='叠加原始单次读数空心点(需 --groups)')
+    sps['scatter'].add_argument('--no-highlight', action='store_true',
+                                help='关闭"最好/最差"高亮(groups 模式默认已关)')
+    sps['violin'].add_argument('--mean-sd', action='store_true',
+                               help='组内叠加均值±SD(菱形 + 须,配 IQR 线)')
     sps['bubble'].add_argument('--sizes', help='气泡大小,逗号分隔(面积自动归一)')
     sps['hist'].add_argument('--bins', default='10',
                              help="分箱数:整数 / 'auto' / 逗号分隔边界(如 1,10,20)")
@@ -892,6 +955,19 @@ def _build_parser() -> argparse.ArgumentParser:
     sps['line'].add_argument('--lower',
                              help='区间带下界,逗号分隔(与 --upper 成对使用)')
     sps['line'].add_argument('--upper', help='区间带上界,逗号分隔')
+    sps['line'].add_argument('--err',
+                             help='对称误差(SD/SEM),逗号分隔(与 --lower/--upper 互斥)')
+    sps['line'].add_argument('--err-style', choices=['band', 'whisker'], default='band',
+                             help='区间呈现:band 半透明带(默认)/ whisker 须状误差线')
+    sps['bar'].add_argument('--err', help='对称误差(SD/SEM),逗号分隔,画在柱顶'
+                                         '(横向条形自动切 x 向)')
+    sps['line-multi'].add_argument('--errs',
+                                   help='各系列对称误差 JSON:[[误差...], ...],'
+                                        'null 占位 = 该系列无误差')
+    sps['bar-multi'].add_argument('--errs',
+                                  help='各系列对称误差 JSON(仅分组模式,堆积不支持)')
+    sps['combo'].add_argument('--bar-err', help='柱对称误差,逗号分隔')
+    sps['combo'].add_argument('--line-err', help='折线对称误差,逗号分隔')
     for name in ('pie', 'donut', 'rose', 'treemap'):
         sps[name].add_argument('--percent', action='store_true',
                                help='标签追加占合计 %%(原始值保留,自动归一,如 120 (31%%))')
@@ -916,6 +992,13 @@ def _build_parser() -> argparse.ArgumentParser:
                                     '(vector 默认 20,contour/surface 默认 60)')
     sps['funcplot'].add_argument('--x', help='x 数值,逗号分隔(或 --data 的 x 字段)')
     sps['funcplot'].add_argument('--y', help='y 数值,逗号分隔')
+    sps['funcplot'].add_argument('--points',
+                                 help='实测点 JSON:[[x, y, (err)], ...],'
+                                      '带误差线叠加在曲线上(实验数据 vs 理论曲线)')
+    sps['funcplot'].add_argument('--points-fit', action='store_true',
+                                 help='对实测点做线性拟合,叠加虚线并标注方程与 R²'
+                                      '(需 --points)')
+    sps['funcplot'].add_argument('--points-name', default='实测点', help='实测点图例名')
     sps['funcplot'].add_argument('--sample', type=int, help='LTTB 保形降采样目标点数')
     sps['funcplot'].add_argument('--pi-ticks', action='store_true',
                                  help='刻度按 π/2 步进,渲染 π 分数标签')
@@ -994,8 +1077,8 @@ def main(argv=None) -> int:
     args = _build_parser().parse_args(argv)
     try:
         result = args.func(args)
-    except (ValueError, RuntimeError, OSError) as e:
-        print(f'生成失败: {e}', file=sys.stderr)
+    except Exception as e:  # 分类与文案统一在 errors.py;这里只管传输(stderr + 退出码)
+        print(f'生成失败: {message(e)}', file=sys.stderr)
         return 1
     if isinstance(result, int):  # themes 等子命令直接返回退出码
         return result

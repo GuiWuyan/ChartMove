@@ -12,6 +12,7 @@ from matplotlib.patheffects import Normal
 from ..render import _ease, _render, _stagger
 from ..style import (
     HIGHLIGHT_SIZE,
+    _fit_text,
     _has_spread,
     _legend_bottom,
     _nf,
@@ -23,6 +24,8 @@ from ..style import (
 )
 from ..validate import (
     _check_finite,
+    _linfit,
+    _validate_err,
     _validate_labels,
     _validate_matrix,
     _validate_samples,
@@ -30,43 +33,94 @@ from ..validate import (
 )
 
 
-def _scatter_draw(title, xs, ys, th, name='数值', trend=False, labels=None):
-    """散点绘制闭包:逐点浮现,最大/最小 y 点过线即高亮;trend=True 叠加
-    最小二乘趋势线(虚线,随整体进度渐显);labels 逐点标注在点上方。"""
+def _norm_groups(groups) -> tuple[list[float], list[float], list[float],
+                                 list[tuple[float, float]]]:
+    """重复测量规范:[(x, [读数...]), ...](或 {x: [读数...]})→
+    (x 列表, 均值列表, 样本SD 列表(ddof=1,单读数组 SD=0), 原始读数散点)。"""
+    items = groups.items() if isinstance(groups, dict) else groups
+    xs, means, sds, raw = [], [], [], []
+    for item in items:
+        try:
+            gx, reads = item
+            gx = float(gx)
+            vals = [float(v) for v in reads]
+        except (TypeError, ValueError) as e:
+            raise ValueError('groups 需为 [[x, [重复读数...]], ...]'
+                             '(每组 x + 至少 1 个读数)') from e
+        if not vals:
+            raise ValueError(f'x = {gx:g} 组的重复读数不能为空')
+        _check_finite(vals, f'x = {gx:g} 组的读数')
+        xs.append(gx)
+        means.append(sum(vals) / len(vals))
+        sds.append(float(np.std(vals, ddof=1)) if len(vals) >= 2 else 0.0)
+        raw += [(gx, v) for v in vals]
+    if not xs:
+        raise ValueError('groups 不能为空')
+    return xs, means, sds, raw
+
+
+def _scatter_draw(title, xs, ys, th, name='数值', trend=False, labels=None,
+                  xerr=None, yerr=None, trend_eq=False, raw=None, highlight=True):
+    """散点绘制闭包:逐点浮现,最大/最小 y 点过线即高亮(highlight=False 关闭,
+    重复测量聚合场景"最好/最差"无统计意义);trend=True 叠加最小二乘
+    趋势线(虚线,随整体进度渐显),trend_eq 再标注方程与 R²;xerr/yerr 为对称
+    误差须(随所在点浮现);raw 为原始单次读数(空心点,淡色垫底);labels 逐点
+    标注在点上方。"""
     n = len(xs)
 
     def draw(ax, p):
         _style(ax, title, th)
+        if raw:  # 原始单次读数:空心小点垫底,随整体进度淡入
+            ax.scatter([r[0] for r in raw], [r[1] for r in raw], s=42,
+                       facecolors='none', edgecolors=th['axis'], linewidths=1.2,
+                       alpha=0.75 * _ease(p), zorder=3)
         for i in range(n):
             pr = _stagger(p, i, n)
             if pr <= 0:
                 continue
             ax.scatter([xs[i]], [ys[i]], s=120 * (0.3 + 0.7 * pr), color=th['palette'][0],
                        alpha=0.85, edgecolors=th['face'], linewidths=1.2, zorder=5)
+            if xerr is not None or yerr is not None:
+                ax.errorbar([xs[i]], [ys[i]],
+                            xerr=[xerr[i]] if xerr is not None else None,
+                            yerr=[yerr[i]] if yerr is not None else None,
+                            fmt='none', ecolor=th['axis'], elinewidth=1.5,
+                            capsize=4, capthick=1.4, alpha=pr, zorder=4)
         pos = _ease(p) * (n - 1) if n > 1 else 0.0
-        if _has_spread(ys):
+        if highlight and _has_spread(ys):
             for idx, c in ((ys.index(max(ys)), th['hi_max']),
                            (ys.index(min(ys)), th['hi_min'])):
                 if pos >= idx:
                     ax.scatter([xs[idx]], [ys[idx]], s=HIGHLIGHT_SIZE, color=c, zorder=6,
                                edgecolors=th['face'], linewidths=1.5)
         if trend and n >= 2:
-            k, b = np.polyfit(xs, ys, 1)
+            k, b, r2 = _linfit(xs, ys)
             x0, x1 = min(xs), max(xs)
             ax.plot([x0, x1], [k * x0 + b, k * x1 + b], color=th['palette'][1],
                     linewidth=2, linestyle='--', alpha=_ease(p), zorder=4)
+            if trend_eq:
+                _fit_text(ax, k, b, r2, th)
         if labels:
             for i, lb in enumerate(labels):
                 if _stagger(p, i, n) > 0.5:
                     ax.annotate(str(lb), (xs[i], ys[i]), textcoords='offset points',
                                 xytext=(0, 10), ha='center', fontsize=11, color=th['text'])
-        _ylim(ax, ys, th)
+        ylim_src = list(ys)
+        if yerr is not None:
+            ylim_src += [y - e for y, e in zip(ys, yerr)]
+            ylim_src += [y + e for y, e in zip(ys, yerr)]
+        _ylim(ax, ylim_src, th)
         _vfmt(ax, xs, th, axis='x')
         _vfmt(ax, ys, th)
-        _xlim(ax, min(xs), max(xs))  # 散点逐个出现,x 轴必须从首帧钉在最终范围
+        x_pad = max(xerr) if xerr is not None else 0.0
+        _xlim(ax, min(xs) - x_pad, max(xs) + x_pad)  # 散点逐个出现,x 轴必须从首帧钉在最终范围
         handles = [Line2D([0], [0], linestyle='none', marker='o', markersize=12,
                           markerfacecolor=th['palette'][0], label=name)]
-        if _has_spread(ys):
+        if raw:
+            handles.append(Line2D([0], [0], linestyle='none', marker='o', markersize=9,
+                                  markerfacecolor='none', markeredgecolor=th['axis'],
+                                  label='单次读数'))
+        if highlight and _has_spread(ys):
             handles += [Line2D([0], [0], linestyle='none', marker='o', markersize=13,
                                markerfacecolor=c, label=t)
                         for c, t in ((th['hi_max'], '最好'), (th['hi_min'], '最差'))]
@@ -74,15 +128,39 @@ def _scatter_draw(title, xs, ys, th, name='数值', trend=False, labels=None):
     return draw
 
 
-def scatter(title: str, xs, ys, *, name='数值', trend=False, labels=None,
+def scatter(title: str, xs=None, ys=None, *, name='数值', trend=False, trend_eq=False,
+            labels=None, xerr=None, yerr=None, groups=None, show_raw=False,
+            highlight: bool | None = None,
             style='business', animate=False, fmt=None, loop=False, out: str | None = None,
             out_dir=None, figsize=None, dpi=None, numfmt='auto',
             note: str | None = None) -> Path:
-    """散点图:x/y 均为数值列表;trend=True 加线性趋势线,labels 可标注每个点。"""
-    x, y = _validate_xy(xs, ys)
-    lbs = _validate_labels(labels, len(x))
+    """散点图:x/y 均为数值列表;trend=True 加线性趋势线,trend_eq 再标注方程与 R²;
+    xerr/yerr 对称误差须;groups=[[x, [重复读数...]], ...] 逐组聚合均值±SD
+    (与 x/y 互斥,图例名默认「均值 ± SD」),show_raw 叠加原始单次读数空心点;
+    highlight=None 自动(普通散点开,groups 模式默认关——"最好/最差"对重复测量
+    无统计意义),True/False 强制开/关。"""
+    raw = None
+    if highlight is None:
+        highlight = groups is None
+    if groups is not None:
+        if xs is not None or ys is not None:
+            raise ValueError('groups(重复测量)与 x/y 只能二选一:'
+                             '已有均值用 x/y + yerr,原始读数用 groups')
+        xs, ys, yerr, pts = _norm_groups(groups)
+        raw = pts if show_raw else None
+        if name == '数值':
+            name = '均值 ± SD'
+    else:
+        if show_raw:
+            raise ValueError('show_raw 需要 groups(原始单次读数来自重复测量数据)')
+        xs, ys = _validate_xy(xs, ys)
+    xerr = _validate_err(xs, xerr, what='xerr') if xerr is not None else None
+    yerr = _validate_err(ys, yerr, what='yerr') if yerr is not None else None
+    lbs = _validate_labels(labels, len(xs))
     th = _theme(style, numfmt, note)
-    return _render('scatter', title, _scatter_draw(title, x, y, th, name, trend, lbs),
+    return _render('scatter', title,
+                   _scatter_draw(title, xs, ys, th, name, trend, lbs,
+                                 xerr, yerr, trend_eq, raw, highlight),
                    animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)
 
@@ -228,8 +306,9 @@ def box(title: str, series, *, style='business', animate=False, fmt=None, loop=F
                    th=th, figsize=figsize, dpi=dpi)
 
 
-def _violin_draw(title, groups, th):
-    """groups: [(组名, np.ndarray 样本), ...];动画 = 小提琴从中位数向两侧展开。"""
+def _violin_draw(title, groups, th, mean_sd=False):
+    """groups: [(组名, np.ndarray 样本), ...];动画 = 小提琴从中位数向两侧展开;
+    mean_sd=True 组内叠加均值菱形 + ±SD 须(论文惯用的摘要统计增强)。"""
     n = len(groups)
     lo = min(float(a.min()) for _, a in groups)
     hi = max(float(a.max()) for _, a in groups)
@@ -256,6 +335,14 @@ def _violin_draw(title, groups, th):
                     color=th['text'], alpha=0.6 * pr, linewidth=2.5, zorder=5,
                     solid_capstyle='butt')
             ax.scatter([i + 1], [med], s=45, color=th['text'], alpha=pr, zorder=6)
+            if mean_sd:
+                mean = float(a.mean())
+                sd = float(a.std(ddof=1)) if a.size >= 2 else 0.0
+                # 均值菱形 + ±SD 须,与小提琴一起从中心展开;菱形区别于中位数圆点
+                ax.errorbar([i + 1], [med + (mean - med) * pr],
+                            yerr=[[sd * pr], [sd * pr]], fmt='D', markersize=6,
+                            color=th['hi_max'], ecolor=th['hi_max'], elinewidth=1.4,
+                            capsize=4, capthick=1.4, alpha=pr, zorder=7)
         ax.set_xticks(range(1, n + 1))
         ax.set_xticklabels([nm for nm, _ in groups])
         ax.set_xlim(0.5, n + 0.5)  # 小提琴逐个出现,x 轴从首帧钉在最终范围
@@ -266,9 +353,10 @@ def _violin_draw(title, groups, th):
 
 def violin(title: str, series, *, style='business', animate=False, fmt=None, loop=False,
            out: str | None = None, out_dir=None, figsize=None, dpi=None, numfmt='auto',
-           note: str | None = None) -> Path:
+           note: str | None = None, mean_sd=False) -> Path:
     """小提琴图:series=[(组名, 原始样本), ...],各组样本数无需对齐;KDE 密度形态 +
-    组内 IQR 线与中位数点;每组需 ≥2 个不同取值。animate=True 从中位数展开。"""
+    组内 IQR 线与中位数点;mean_sd=True 叠加均值±SD(菱形 + 须);
+    每组需 ≥2 个不同取值。animate=True 从中位数展开。"""
     ss = _validate_samples(series)
     for nm, vals in ss:
         if len(set(vals)) < 2:  # 零方差会让 gaussian KDE 抛英文 LinAlgError,入口先拦
@@ -277,7 +365,7 @@ def violin(title: str, series, *, style='business', animate=False, fmt=None, loo
     th = _theme(style, numfmt, note)
     return _render('violin', title,
                    _violin_draw(title, [(nm, np.asarray(v, dtype=float))
-                                        for nm, v in ss], th),
+                                        for nm, v in ss], th, mean_sd),
                    animate=animate, fmt=fmt, loop=loop, out=out, out_dir=out_dir,
                    th=th, figsize=figsize, dpi=dpi)
 

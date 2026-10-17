@@ -13,6 +13,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 from ._version import __version__
+from .errors import message
 from .table import (
     file_box_groups,
     file_columns,
@@ -128,7 +129,27 @@ def _bins(bins):
         'a {source, target, value} dict); flows left to right, node height = '
         'flow volume, cycles and non-positive values are rejected; '
         'line accepts lower + upper (same length as values) to draw a '
-        'semi-transparent prediction/confidence band; '
+        'semi-transparent prediction/confidence band, or err (symmetric errors, '
+        'e.g. SD/SEM) as a shorthand; err_style chooses band (default, '
+        'translucent band) or whisker (error-bar caps); '
+        'error bars (symmetric, same length as the data, >= 0): bar accepts '
+        'err (on bar tips, x-direction when horizontal=true); '
+        'line-multi / bar-multi accept errs = [[errors], ...] parallel to '
+        'series (a null entry skips that series; bar-multi grouped mode only - '
+        'rejected with stacked/percent); combo accepts bar_err / line_err; '
+        'scatter accepts xerr / yerr, trend_eq=true annotates the regression '
+        'equation and R-squared next to the trend line; '
+        'scatter groups = [[x, [replicate_readings], ...], ...] aggregates '
+        'replicates to mean +- SD per x (mutually exclusive with x/y; legend '
+        'defaults to 均值 ± SD), show_raw=true overlays the raw single readings '
+        'as open circles (needs groups); highlight=false removes the '
+        'best/worst max-min markers (auto-off in groups mode); '
+        'violin mean_sd=true overlays a mean diamond with a ±SD whisker per '
+        'group; '
+        'funcplot points = [[x, y, (err)], ...] overlays measured points with '
+        'error bars on the curve (experiment vs theory), points_fit=true adds '
+        'a linear fit of those points annotated with equation and R-squared, '
+        'points_name = legend label (default 实测点); '
         'scatter/bubble: x + y (+sizes for bubble, +labels optional); '
         'hist: values = raw samples, bins is an int, "auto", or a strictly '
         'increasing edge array (e.g. [1,10,20]); '
@@ -227,6 +248,21 @@ def make_chart(
     sample: int | None = None,
     lower: list[float] | None = None,
     upper: list[float] | None = None,
+    err: list[float] | None = None,
+    err_style: Literal['band', 'whisker'] = 'band',
+    errs: list | None = None,
+    xerr: list[float] | None = None,
+    yerr: list[float] | None = None,
+    trend_eq: bool = False,
+    groups: list | None = None,
+    show_raw: bool = False,
+    highlight: bool | None = None,
+    bar_err: list[float] | None = None,
+    line_err: list[float] | None = None,
+    mean_sd: bool = False,
+    points: list | None = None,
+    points_name: str = '实测点',
+    points_fit: bool = False,
     starts: list[float] | None = None,
     ends: list[float] | None = None,
     slope: bool = False,
@@ -268,8 +304,9 @@ def make_chart(
         common['numfmt'] = 'plain'   # math 域默认 plain(与 CLI set_defaults 一致)
     if type in ('line', 'area', 'line-multi', 'funcplot'):  # sample 仅折线类/函数图支持
         common['sample'] = sample
-    if type == 'line':  # 区间带仅单系列折线支持
+    if type == 'line':  # 区间带 / 对称误差仅单系列折线支持
         common['lower'], common['upper'] = lower, upper
+        common['err'], common['err_style'] = err, err_style
     try:
         # stdio 协议独占 stdout:内核里"图表已生成"等打印必须让道,否则污染 JSON-RPC 流
         with contextlib.redirect_stdout(sys.stderr):
@@ -279,7 +316,7 @@ def make_chart(
                                   stacked=stacked, percent=percent, bins=bins, slope=slope,
                                   mode=mode, density=density, pi_ticks=pi_ticks,
                                   fill=fill, arrows=arrows, elev=elev, azim=azim,
-                                  long=long)
+                                  long=long, inline_err=err)
             if type == 'area' and (series is not None or stacked or percent):
                 # 多系列面积(可堆积):series 给出,或单系列误传堆积开关时给出指路错误
                 if series is None:
@@ -296,7 +333,8 @@ def make_chart(
                          'categories 与 values 不能为空')
                 if type == 'bar':
                     return _result(_chart_fn('bar')(title, categories, values,
-                                                    horizontal=horizontal, **common),
+                                                    horizontal=horizontal, err=err,
+                                                    **common),
                                    type, style, animate)
                 if type == 'waterfall':
                     return _result(_chart_fn('waterfall')(title, categories, values,
@@ -311,22 +349,35 @@ def make_chart(
                          and line_values is not None,
                          'combo 需要 categories、values(柱值)与 line_values(线值)')
                 return _result(_chart_fn('combo')(title, categories, values,
-                                                  line_values, **common),
+                                                  line_values, bar_err=bar_err,
+                                                  line_err=line_err, **common),
                                type, style, animate)
             if type in _SERIES_TYPES:
                 _require(categories is not None and series is not None,
                          '多系列图需要 categories 与 series')
                 extra = ({'stacked': stacked, 'percent': percent}
                          if type == 'bar-multi' else {})
+                if errs is not None:
+                    extra['errs'] = errs
                 return _result(_chart_fn(type)(title, categories,
                                                _norm_series(series), **extra, **common),
                                type, style, animate)
             if type in ('box', 'violin'):
                 _require(series is not None,
                          f'{type} 需要 series=[[组名, [样本...]], ...]')
-                return _result(_chart_fn(type)(title, _norm_series(series), **common),
+                extra = {'mean_sd': mean_sd} if type == 'violin' else {}
+                return _result(_chart_fn(type)(title, _norm_series(series), **extra,
+                                               **common),
                                type, style, animate)
             if type in _XY_TYPES:
+                if type == 'scatter' and groups is not None:
+                    _require(x is None and y is None,
+                             'scatter 的 groups(重复测量)与 x/y 只能二选一')
+                    return _result(_chart_fn('scatter')(title, groups=groups,
+                                                        trend=trend, trend_eq=trend_eq,
+                                                        show_raw=show_raw,
+                                                        highlight=highlight, **common),
+                                   type, style, animate)
                 _require(x is not None and y is not None, 'scatter/bubble 需要 x 与 y')
                 if type == 'bubble':
                     _require(sizes is not None, 'bubble 需要 sizes')
@@ -334,7 +385,9 @@ def make_chart(
                                                        labels=labels, **common),
                                    type, style, animate)
                 return _result(_chart_fn('scatter')(title, x, y, trend=trend,
-                                                    labels=labels, **common),
+                                                    trend_eq=trend_eq, labels=labels,
+                                                    xerr=xerr, yerr=yerr,
+                                                    highlight=highlight, **common),
                                type, style, animate)
             if type == 'hist':
                 _require(values is not None, 'hist 需要 values(原始样本)')
@@ -380,32 +433,38 @@ def make_chart(
                                            pi_ticks=pi_ticks, fill=fill, arrows=arrows,
                                            elev=elev, azim=azim, expr=expr,
                                            xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax,
-                                           samples=samples, common=common),
+                                           samples=samples, points=points,
+                                           points_name=points_name,
+                                           points_fit=points_fit, common=common),
                                type, style, animate)
             raise ToolError(f'未知图表类型 {type!r},'
                             f'可选:{", ".join(get_args(ChartType))}')
-    except (ValueError, RuntimeError, OSError) as e:  # 中文校验消息 → ToolError
-        raise ToolError(str(e)) from e
+    except ToolError:
+        raise
+    except Exception as e:  # 分类与文案统一在 errors.py;这里只管传输(→ ToolError)
+        raise ToolError(message(e)) from e
 
 
 def _math_chart(type, title, *, x, y, u, v, z, curves, rows, cols, matrix, mode,
                 density, pi_ticks, fill, arrows, elev, azim, expr, xmin, xmax,
-                ymin, ymax, samples, common):
+                ymin, ymax, samples, points, points_name, points_fit, common):
     """math 域内联数据分发(数值序列/矩阵/表达式,列约定见 make_chart description);
     返回 Path,由调用方包 _result。"""
     from .graph.charts.math import sample_curves, sample_field, sample_param, sample_vector_field
     fn = _chart_fn(type)
     if type == 'funcplot':
+        pts = dict(points=points, points_name=points_name,
+                   points_fit=points_fit) if points is not None else {}
         if expr:
             _require(not (x or y or curves), 'funcplot 的 expr 与 x/y/curves 不能同时给')
             curves = sample_curves(expr, xmin=xmin, xmax=xmax, samples=samples or 400)
-            return fn(title, curves=curves, pi_ticks=pi_ticks, **common)
+            return fn(title, curves=curves, pi_ticks=pi_ticks, **pts, **common)
         if curves is not None:
-            return fn(title, curves=curves, pi_ticks=pi_ticks, **common)
+            return fn(title, curves=curves, pi_ticks=pi_ticks, **pts, **common)
         _require(x is not None and y is not None,
                  'funcplot 需要 x 与 y(或 curves=[[名称, x, y], ...],'
                  '或 expr 表达式 + xmin/xmax)')
-        return fn(title, x, y, pi_ticks=pi_ticks, **common)
+        return fn(title, x, y, pi_ticks=pi_ticks, **pts, **common)
     if type == 'polar':
         if expr:
             _require(not x and not y, 'polar 的 expr 与 x/y 不能同时给')
@@ -475,8 +534,9 @@ def _math_chart(type, title, *, x, y, u, v, z, curves, rows, cols, matrix, mode,
 def _from_file(type, title, file, cat_col, col, sheet, common, *, horizontal, trend,
                total, stacked, percent, bins, slope, mode='quiver', density=1.0,
                pi_ticks=False, fill=False, arrows=False, elev=28.0, azim=-60.0,
-               long=False) -> str:
-    """file 数据出图:列约定与 CLI --file 一致,数据转换复用 table.py。"""
+               long=False, inline_err=None) -> str:
+    """file 数据出图:列约定与 CLI --file 一致,数据转换复用 table.py;
+    inline_err 为内联 err 参数(bar 单系列误差线,file 多列升级时拒收)。"""
 
     def done(path, type_name: str):
         return _result(path, type_name, common['style'], common['animate'])
@@ -486,22 +546,26 @@ def _from_file(type, title, file, cat_col, col, sheet, common, *, horizontal, tr
         _require(cols, 'file 至少需要 1 列数值')
         if len(cols) >= 2:  # 多数值列自动升级为多系列(与 CLI --file 一致)
             if type == 'bar':
+                _require(inline_err is None,
+                         'bar 的 err 误差线仅支持单系列(多列数值会升级为 '
+                         'bar-multi,误差请用 errs 参数)')
                 return done(_chart_fn('bar-multi')(title, cats, cols, stacked=stacked,
                                                    percent=percent, **common),
                             'bar-multi')
-            # 区间带只对单系列折线有意义:必须摘掉 lower/upper 再调 line-multi,
+            # 区间带 / 误差线只对单系列折线有意义:必须摘掉再调 line-multi,
             # 否则未知关键字 TypeError 裸穿 except(它不在中文转换的异常元组里)
-            if common.get('lower') is not None or common.get('upper') is not None:
-                raise ToolError('区间带 lower/upper 仅支持单系列折线;'
+            strip = ('lower', 'upper', 'err', 'err_style')
+            if any(common.get(k) is not None and k != 'err_style' for k in strip):
+                raise ToolError('区间带 lower/upper 与误差线 err 仅支持单系列折线;'
                                 'file 含多列数值时会升级为多系列折线,'
                                 '请用 col 指定其中 1 列')
-            multi_common = {k: v for k, v in common.items()
-                            if k not in ('lower', 'upper')}
+            multi_common = {k: v for k, v in common.items() if k not in strip}
             return done(_chart_fn('line-multi')(title, cats, cols, **multi_common),
                         'line-multi')
         if type == 'bar':
             return done(_chart_fn('bar')(title, cats, cols[0][1],
-                                         horizontal=horizontal, **common), type)
+                                         horizontal=horizontal, err=inline_err,
+                                         **common), type)
         return done(_chart_fn('line')(title, cats, cols[0][1], name=cols[0][0],
                                       **common), type)
     if type == 'area':

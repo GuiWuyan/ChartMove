@@ -467,3 +467,50 @@ def test_cli_expression_conflicts_rejected(tmp_path):
     assert cli.main(['vector', 't', 'x', '--xmin', '0', '--xmax', '1',
                      '--ymin', '0', '--ymax', '1',
                      '--out-dir', str(tmp_path)]) == 1
+
+
+# ==================== funcplot 实测点(points)与拟合标注 ====================
+
+def test_funcplot_points_and_fit(tmp_path):
+    """实测点带误差叠加曲线 + points_fit 拟合虚线与方程/R² 标注,出图且轴容纳点。"""
+    xs = [i * 0.5 for i in range(20)]
+    ys = [0.04 * x + 0.09 for x in xs]
+    p = funcplot('实验点拟合', xs, ys,
+                 points=[[1, 0.12, 0.02], [4, 0.26, 0.03], [8, 0.40, 0.02]],
+                 points_fit=True, out_dir=tmp_path, out='fp_pts')
+    assert p.exists() and p.stat().st_size > 0
+    p.unlink()
+    # 轴范围必须容纳实测点 ± 误差
+    from chartmove.graph.charts.math import _funcplot_draw, _validate_points
+    from chartmove.graph.style import _theme as _th
+    fig, ax = plt.subplots()
+    try:
+        pts = _validate_points([[1, 0.12, 0.02], [4, 0.26, 0.03], [8, 0.40, 0.02]])
+        _funcplot_draw('t', [('y', np.asarray(xs), np.asarray(ys))], _th('business'),
+                       False, False, True, pts, '实测点', True)(ax, 1.0)
+        assert ax.get_ylim()[0] <= 0.10 and ax.get_ylim()[1] >= 0.43
+        assert any('R²' in t.get_text() for t in ax.texts)
+    finally:
+        plt.close(fig)
+
+
+def test_funcplot_points_validation():
+    """points 行格式 / 负误差 / 空列表 / points_fit 缺 points 均给中文错。"""
+    with pytest.raises(ValueError, match='points_fit'):
+        funcplot('t', [1, 2], [1, 2], points_fit=True)
+    with pytest.raises(ValueError, match=r'\[x, y'):
+        funcplot('t', [1, 2], [1, 2], points=[[1, 2, 3, 4]])
+    with pytest.raises(ValueError, match='没有负值'):
+        funcplot('t', [1, 2], [1, 2], points=[[1, 1, -0.1]])
+    with pytest.raises(ValueError, match='不能为空'):
+        funcplot('t', [1, 2], [1, 2], points=[])
+
+
+def test_cli_funcplot_points_fit(tmp_path):
+    """CLI --points/--points-fit/--points-name 透传出图。"""
+    assert cli.main(['funcplot', '标准曲线', '0.0418*x+0.087',
+                     '--xmin', '0', '--xmax', '20',
+                     '--points', '[[0,0.02,0.01],[4,0.23,0.03],[16,0.75,0.03]]',
+                     '--points-fit', '--points-name', '各管均值',
+                     '--out-dir', str(tmp_path), '--out', 'm4_fit']) == 0
+    assert (tmp_path / 'm4_fit.png').exists()

@@ -15,8 +15,8 @@ from matplotlib.colors import LinearSegmentedColormap, to_rgba
 from matplotlib.ticker import FuncFormatter, MultipleLocator
 
 from ..render import _ease, _render, _stagger
-from ..style import _theme
-from ..validate import _lttb_indices
+from ..style import _fit_text, _theme
+from ..validate import _linfit, _lttb_indices
 
 MAX_POINTS = 100_000   # 单曲线点数上限:文件数据与表达式采样共用这道闸
 
@@ -196,15 +196,55 @@ def _curve_sample(curves: list, sample: int | None) -> list:
     return out
 
 
+def _validate_points(points) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """实测点规范:[[x, y] 或 [x, y, err], ...] → (x, y, err 三个等长数组);
+    err 缺省 0,须有限且 >=0(误差没有负值)。"""
+    try:
+        rows = list(points)
+    except TypeError as e:
+        raise ValueError('points 需为 [[x, y, (err)], ...] 列表') from e
+    if not rows:
+        raise ValueError('points 不能为空')
+    xs, ys, es = [], [], []
+    for i, row in enumerate(rows):
+        try:
+            vals = [float(v) for v in row]
+        except (TypeError, ValueError) as e:
+            raise ValueError(f'points 第 {i + 1} 行需为 [x, y] 或 [x, y, err]') from e
+        if len(vals) == 2:
+            vals.append(0.0)
+        if len(vals) != 3:
+            raise ValueError(f'points 第 {i + 1} 行需为 [x, y] 或 [x, y, err],'
+                             f'收到 {len(vals)} 个值')
+        px, py, pe = vals
+        if not (math.isfinite(px) and math.isfinite(py) and math.isfinite(pe)):
+            raise ValueError(f'points 第 {i + 1} 行含 nan / inf 等非法数值')
+        if pe < 0:
+            raise ValueError(f'points 第 {i + 1} 行的 err 需 >= 0(误差没有负值),'
+                             f'收到 {pe:g}')
+        xs.append(px)
+        ys.append(py)
+        es.append(pe)
+    return np.asarray(xs), np.asarray(ys), np.asarray(es)
+
+
 # ==================== funcplot 函数图像 ====================
 
-def _funcplot_draw(title, curves, th, pi_ticks, equal, grid):
-    """绘制闭包:轴范围按全量数据定稿(动画轴不跳动),曲线按错峰进度渐进画出。"""
-    all_x = np.concatenate([xs for _, xs, _ in curves])
-    all_y = np.concatenate([ys for _, _, ys in curves])
-    x0, x1 = _limits(all_x)
-    y0, y1 = _limits(all_y)
+def _funcplot_draw(title, curves, th, pi_ticks, equal, grid,
+                   pts=None, pts_name='实测点', pts_fit=False):
+    """绘制闭包:轴范围按全量数据(曲线 + 实测点 ± 误差)定稿(动画轴不跳动),
+    曲线按错峰进度渐进画出;pts 为实测点 (x, y, err),逐点带误差须错峰浮现,
+    pts_fit 再叠加实测点的线性拟合虚线并标注方程与 R²(物理实验报告惯例)。"""
+    all_x = [xs for _, xs, _ in curves]
+    all_y = [ys for _, _, ys in curves]
+    if pts is not None:
+        pxs, pys, pes = pts
+        all_x.append(pxs)
+        all_y += [pys, pys - pes, pys + pes]  # 轴范围须容纳误差须端点
+    x0, x1 = _limits(np.concatenate(all_x))
+    y0, y1 = _limits(np.concatenate(all_y))
     n = len(curves)
+    m = 0 if pts is None else len(pxs)
 
     def draw(ax, p):
         _math_style(ax, title, th, pi_ticks=pi_ticks, equal=equal, grid=grid)
@@ -213,19 +253,45 @@ def _funcplot_draw(title, curves, th, pi_ticks, equal, grid):
         _origin_spines(ax)
         for i, (nm, xs, ys) in enumerate(curves):
             k = max(2, int(round(xs.size * _stagger(p, i, n))))
-            ax.plot(xs[:k], ys[:k], lw=2.2, label=nm,
+            ax.plot(xs[:k], ys[:k], lw=2.2,
+                    label=nm if nm else '_nolegend_',  # 无名曲线不进图例
                     color=th['palette'][i % len(th['palette'])])
-        if any(nm for nm, _, _ in curves):
-            ax.legend(frameon=False, fontsize=13, labelcolor=th['text'])
+        if pts is not None:
+            pcol = th['palette'][n % len(th['palette'])]  # 与曲线错开的主题色
+            for i in range(m):
+                pr = _stagger(p, i, m)
+                if pr <= 0:
+                    continue
+                ax.errorbar([pxs[i]], [pys[i]], yerr=[[pes[i] * pr], [pes[i] * pr]],
+                            fmt='o', markersize=6 * (0.3 + 0.7 * pr),
+                            markerfacecolor=pcol, markeredgecolor=th['face'],
+                            markeredgewidth=1.0, ecolor=pcol, elinewidth=1.5,
+                            capsize=4, capthick=1.4, alpha=pr, zorder=5,
+                            label=pts_name if i == 0 else None)
+            if pts_fit and m >= 2 and len(set(pxs.tolist())) >= 2:
+                k1, b1, r2 = _linfit(pxs, pys)
+                fx0, fx1 = float(pxs.min()), float(pxs.max())
+                # 拟合虚线用正文色:与"方程 + R²"标注同色,区别于实测点主题色
+                ax.plot([fx0, fx1], [k1 * fx0 + b1, k1 * fx1 + b1], lw=2,
+                        linestyle='--', color=th['text'], alpha=_ease(p), zorder=4)
+                _fit_text(ax, k1, b1, r2, th)
+        if any(nm for nm, _, _ in curves) or (pts is not None and pts_name):
+            # 图例固定放绘图区上方右侧:math 域脊线过原点,刻度文字画在绘图区内侧,
+            # 图内任意角落(loc='best')都会与刻度/曲线争位
+            ax.legend(frameon=False, fontsize=13, labelcolor=th['text'],
+                      loc='lower right', bbox_to_anchor=(1.0, 1.0))
     return draw
 
 
 def funcplot(title, x=None, y=None, *, curves=None, name=None, style='business',
              pi_ticks=False, equal=False, grid=True, sample=None,
+             points=None, points_name='实测点', points_fit=False,
              animate=False, fmt=None, loop=False, out=None, out_dir=None,
              figsize=None, dpi=None, numfmt='plain', note=None) -> Path:
     """函数图像:连续数值轴上画 y=f(x) 采样点,按 x 升序连线,nan 断线分段。
     curves=[(曲线名, x, y), ...] 叠加多条曲线(主题色轮转);单条用 x/y(可选 name)。
+    points=[[x, y, (err)], ...] 叠加带误差线的实测点(实验数据 vs 理论曲线),
+    points_fit=True 对实测点做线性拟合并标注方程与 R²;
     sample=LTTB 降采样目标点数(超长采样);pi_ticks=True 用 π/2 步进刻度。"""
     if curves is not None:
         if x is not None or y is not None:
@@ -236,19 +302,24 @@ def funcplot(title, x=None, y=None, *, curves=None, name=None, style='business',
         curves = [(name, x, y)]
     if not curves:
         raise ValueError('curves 不能为空')
+    if points_fit and points is None:
+        raise ValueError('points_fit 需要 points(拟合对象是实测点)')
     norm = []
     for i, item in enumerate(curves):
         try:
             nm, xs, ys = item
         except (TypeError, ValueError) as e:
             raise ValueError('curves 每项需为 (名称, x, y) 三元组') from e
-        nm = str(nm)
+        nm = str(nm) if nm is not None else ''  # 无名曲线保持空名(不进图例)
         what = f'曲线「{nm}」' if nm else f'第 {i + 1} 条曲线'
         xs, ys = _validate_xy(xs, ys, allow_nan=True, sort_x=True, what=what)
         norm.append((nm, xs, ys))
     norm = _curve_sample(norm, sample)
+    pts = _validate_points(points) if points is not None else None
     th = _theme(style, numfmt, note)
-    return _render('funcplot', title, _funcplot_draw(title, norm, th, pi_ticks, equal, grid),
+    return _render('funcplot', title,
+                   _funcplot_draw(title, norm, th, pi_ticks, equal, grid,
+                                  pts, points_name, points_fit),
                    animate=animate, fmt=fmt, out=out, out_dir=out_dir, loop=loop,
                    figsize=figsize, dpi=dpi, th=th)
 

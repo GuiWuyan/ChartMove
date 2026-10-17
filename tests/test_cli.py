@@ -459,3 +459,47 @@ def test_batch_stacked_area_gif(tmp_path):
                      '--out-dir', str(tmp_path)]) == 0
     _expect_file(tmp_path, 'area_1月.gif')
     _expect_file(tmp_path, 'area_2月.gif')
+
+
+def test_error_bar_flags(tmp_path):
+    """误差线全家桶:line/bar/bar-multi/line-multi/combo/scatter/violin 旗标透传出图。"""
+    _run(tmp_path, 'line', '须状', *PAIRS, '--err', '2,3,2', '--err-style', 'whisker')
+    _expect_file(tmp_path, 'line_须状.png')
+    _run(tmp_path, 'bar', '柱误差', *PAIRS, '--err', '2,3,2')
+    _expect_file(tmp_path, 'bar_柱误差.png')
+    _run(tmp_path, 'bar', '横向误差', *PAIRS, '--err', '2,3,2', '--horizontal')
+    _expect_file(tmp_path, 'bar_横向误差.png')
+    _run(tmp_path, 'line-multi', '多系列误差', '--categories', 'a,b,c', '--series',
+         json.dumps([['s1', [1, 2, 3]], ['s2', [2, 3, 4]]]),
+         '--errs', json.dumps([None, [0.2, 0.2, 0.2]]))
+    _expect_file(tmp_path, 'line_multi_多系列误差.png')
+    _run(tmp_path, 'bar-multi', '分组误差', '--categories', 'a,b', '--series',
+         json.dumps([['s1', [10, 20]], ['s2', [15, 25]]]),
+         '--errs', json.dumps([[1, 2], [2, 1]]))
+    _expect_file(tmp_path, 'bar_multi_分组误差.png')
+    _run(tmp_path, 'combo', '组合误差', *PAIRS, '--line', '5,8,6',
+         '--bar-err', '1,2,1', '--line-err', '0.5,0.5,0.4')
+    _expect_file(tmp_path, 'combo_组合误差.png')
+    _run(tmp_path, 'scatter', '误差散点', '--x', '1,2,3,4', '--y', '1.1,2.0,2.9,4.1',
+         '--yerr', '0.1,0.2,0.15,0.1', '--xerr', '0.05,0.05,0.05,0.05',
+         '--trend', '--trend-eq')
+    _expect_file(tmp_path, 'scatter_误差散点.png')
+    _run(tmp_path, 'scatter', '重复测量', '--groups',
+         json.dumps([[0, [0.02, 0.03]], [4, [0.25, 0.28, 0.22]], [8, [0.45, 0.5]]]),
+         '--trend', '--trend-eq', '--show-raw')
+    _expect_file(tmp_path, 'scatter_重复测量.png')
+    _run(tmp_path, 'violin', '均值SD', '--series',
+         json.dumps([['g1', [1, 2, 3, 4]], ['g2', [2, 3, 4, 5]]]), '--mean-sd')
+    _expect_file(tmp_path, 'violin_均值SD.png')
+
+
+def test_error_bar_flag_errors(tmp_path, capsys):
+    """误差线旗标误用:堆积+errs、err 与 lower/upper 同给给中文错,退出码 1。"""
+    assert cli.main(['bar-multi', 't', '--categories', 'a,b', '--series',
+                     json.dumps([['s1', [1, 2]]]), '--stacked', '--errs',
+                     json.dumps([[1, 2]]), '--out-dir', str(tmp_path)]) == 1
+    assert '堆积' in capsys.readouterr().err
+    assert cli.main(['line', 't', 'a=1', 'b=2', '--err', '1,2',
+                     '--lower', '0,0', '--upper', '3,3',
+                     '--out-dir', str(tmp_path)]) == 1
+    assert '二选一' in capsys.readouterr().err
