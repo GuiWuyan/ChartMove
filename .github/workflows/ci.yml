@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "30 20 * * 1" # 每周一 20:30 UTC(周二 4:30 北京):全量回归兜底
 
 jobs:
   lint:
@@ -38,4 +40,6 @@ jobs:
         env:
           PYTHONIOENCODING: utf-8
       - run: python -c "import chartmove.mcp_server" # MCP 入口可导入
-      - run: pytest -q -n auto --dist loadgroup
+      # PR 只跑冒烟(-m "not slow":跳过全速动画/全类型矩阵/MCP 会话,约 1 分钟);
+      # main push 与每周定时跑全量兜底
+      - run: pytest -q -n auto --dist loadgroup ${{ github.event_name == 'pull_request' && '-m not slow' || '' }}

@@ -62,3 +62,6 @@ select = ["E", "F", "W", "I", "UP"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "slow: 耗时用例(全速动画 / 全类型渲染矩阵 / MCP 会话);PR 冒烟以 -m \"not slow\" 跳过,main push 与每周定时跑全量",
+]

@@ -18,6 +18,19 @@ def _light_animation(request, monkeypatch):
     monkeypatch.setattr(render, 'FRAMES', LIGHT_FRAMES)
 
 
+def pytest_collection_modifyitems(config, items):
+    """冒烟分层:重渲染用例自动打 slow 标记,测试文件无需手工维护清单。
+    规则(命中其一即 slow):全速动画 fixture、名字含 gif/mp4/animated、
+    全类型渲染矩阵(test_matrix_*)、MCP 会话文件(test_mcp_server.py)。
+    CI 的 PR job 以 -m "not slow" 只跑冒烟;main push 与每周定时跑全量。"""
+    for item in items:
+        if ('full_animation' in item.fixturenames
+                or item.path.name == 'test_mcp_server.py'
+                or item.name.startswith('test_matrix')
+                or any(k in item.name for k in ('gif', 'mp4', 'animated'))):
+            item.add_marker(pytest.mark.slow)
+
+
 # 进度显示稀疏化:pytest 失败/跳过/xfail 仍逐个显示;-v 等详细模式完全交还原生输出。
 _session = None
 _progress = {"seen": 0, "next": 0}

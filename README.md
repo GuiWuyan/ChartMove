@@ -142,6 +142,7 @@ stdio 传输,2 个工具;工具描述为英文,校验错误以中文 `ToolError`
 py -3.13 -m venv .venv                              # Python >=3.12
 .venv/Scripts/python.exe -m pip install -e ".[dev]" # 可编辑安装 + pytest/ruff
 .venv/Scripts/python.exe -m pytest -n auto          # 全量约 30 秒
+.venv/Scripts/python.exe -m pytest -m "not slow" -n auto  # 冒烟(跳过重渲染/MCP 会话)约 10 秒
 .venv/Scripts/python.exe -m ruff check src tests examples
 .venv/Scripts/python.exe examples/make_all.py        # 一次生成全部 42 张示例(30 类型 + 堆积/误差线变体)
 winget install Gyan.FFmpeg                           # 可选,仅 MP4 需要
